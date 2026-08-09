@@ -10,6 +10,8 @@ declare module 'hono' {
     fetch: any
     get(...args: any[]): this
     post(...args: any[]): this
+    patch(...args: any[]): this
+    delete(...args: any[]): this
     onError(...args: any[]): this
   }
 }
@@ -27,6 +29,7 @@ declare module 'kysely' {
     insertInto(...args: any[]): any
     selectFrom(...args: any[]): any
     updateTable(...args: any[]): any
+    deleteFrom(...args: any[]): any
     destroy(): Promise<void>
   }
   export class PostgresDialect {
@@ -47,5 +50,12 @@ declare module 'zod' {
   export const z: any
   export namespace z {
     type infer<T> = any
+  }
+}
+
+declare module 'kysely/migration' {
+  export class Migrator {
+    constructor(config: any)
+    migrateToLatest(): Promise<any>
   }
 }

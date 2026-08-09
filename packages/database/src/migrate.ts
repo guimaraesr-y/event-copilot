@@ -1,6 +1,7 @@
 import { Migrator } from 'kysely/migration'
 import { createDatabase } from './database.ts'
 import { migration001Foundation } from './migrations/001_foundation.ts'
+import { migration002EventPlanning } from './migrations/002_event_planning.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -9,6 +10,7 @@ const migrator = new Migrator({
     async getMigrations() {
       return {
         '001_foundation': migration001Foundation,
+        '002_event_planning': migration002EventPlanning,
       }
     },
   },

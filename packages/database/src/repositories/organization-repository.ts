@@ -25,13 +25,17 @@ export class OrganizationRepository {
     return this.map(row)
   }
 
-  async exists(id: string): Promise<boolean> {
+  async findById(id: string): Promise<Organization | null> {
     const row = await this.db
       .selectFrom('organizations')
-      .select('id')
+      .selectAll()
       .where('id', '=', id)
       .executeTakeFirst()
-    return Boolean(row)
+    return row ? this.map(row) : null
+  }
+
+  async exists(id: string): Promise<boolean> {
+    return Boolean(await this.findById(id))
   }
 
   private map(row: {

@@ -1,29 +1,33 @@
-Event Command Center — Mini-feature 01
-Validation date: 2026-08-09
+Event Command Center — Mini-feature 02 validation
+Generated: 2026-08-09
 
-PASSED
-- Bun workspace contract
-- compose.yaml YAML parsing and expected services
-- Postgres/API/worker/n8n/gateway dependency structure
-- health-gated startup structure
-- application DB vs n8n logical DB isolation
-- Event database invariants and tenant foreign key
-- Event + event.created transactional outbox boundary
-- full-project TypeScript structural compilation
-- shell entrypoint parsing
-- strict core domain/EventEngine compilation
-- EventEngine behavioral scenarios:
-  1. create event + event.created
-  2. reject end before start
-  3. reject negative guest count
+PASSED in packaging environment:
+- Mini-feature 01 global Compose contract preserved.
+- PostgreSQL / API / worker / n8n / gateway services structurally present.
+- n8n remains isolated in logical database `n8n`.
+- Migration runner uses `Migrator` from `kysely/migration`.
+- `002_event_planning` is registered after `001_foundation`.
+- Planning migration creates templates, template tasks/milestones and event tasks/milestones.
+- Tenant-scoped FK contracts validated structurally.
+- Event + instantiated tasks + milestones + domain outbox messages share one Kysely transaction.
+- Full project TypeScript structure compiles with local external dependency shims.
+- Strict domain/EventEngine compilation passes with local TypeScript 5.8.3.
+- EventEngine executable behavioral validation passes: 8 scenarios.
+- Timezone behavior validated for America/Sao_Paulo:
+    D-30 09:00 => 2026-09-17T12:00:00.000Z
+    D-7  10:00 => 2026-10-10T13:00:00.000Z
+    D-1  18:00 => 2026-10-16T21:00:00.000Z
+- Template tenant isolation validated in EventEngine tests.
+- Template/event-type mismatch rejection validated.
+- Template snapshot immutability validated.
+- Manual task create/complete domain events validated.
+- smoke.sh and PostgreSQL init shell scripts parse successfully.
 
-NOT EXECUTED IN BUILD ENVIRONMENT
-- docker compose up / image pulls / live Postgres and n8n boot
-  Reason: Docker and Bun are not installed in the artifact build environment.
+NOT EXECUTABLE IN PACKAGING ENVIRONMENT:
+- docker compose up --build
+- Bun dependency installation/runtime
+- live PostgreSQL migration execution
+- HTTP runtime smoke against containers
 
-REPRODUCIBLE GLOBAL SMOKE TEST
-  cp .env.example .env
-  docker compose up --build -d
-  ./scripts/smoke.sh
-
-Expected: Smoke test passed.
+Reason: Docker and Bun are not installed in this execution environment.
+Run `./scripts/smoke.sh` after `docker compose up --build -d` on a Docker-enabled machine for the runtime end-to-end validation.
