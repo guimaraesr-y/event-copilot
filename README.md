@@ -176,3 +176,7 @@ The packaging environment has Node/TypeScript/Python but not Docker or Bun, so i
 **Mini-feature 03 — Vendors + Event Vendors + confirmation state.**
 
 That gives the system its first external operational actor and prepares the first genuinely useful n8n workflow: supplier confirmation/reminders.
+
+## Mini-feature 03 — fornecedores
+
+A base agora inclui catálogo de fornecedores e vínculos operacionais por evento. O estado de confirmação é explícito (`pending`, `requested`, `confirmed`, `declined`, `cancelled`) e as mudanças relevantes são publicadas na transactional outbox. Veja `docs/mini-feature-03.md`.

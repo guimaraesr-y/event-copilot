@@ -96,6 +96,45 @@ export interface EventMilestonesTable {
   completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
 }
 
+
+export interface VendorsTable {
+  id: string
+  organization_id: string
+  name: string
+  category: 'buffet' | 'photo' | 'video' | 'decoration' | 'dj' | 'band' | 'cake' | 'sweets' | 'venue' | 'transport' | 'celebrant' | 'security' | 'other'
+  contact_name: string | null
+  phone: string | null
+  email: string | null
+  notes: string | null
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
+export interface EventVendorsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  vendor_id: string
+  vendor_name: string
+  category: VendorsTable['category']
+  contact_name: string | null
+  phone: string | null
+  email: string | null
+  confirmation_status: 'pending' | 'requested' | 'confirmed' | 'declined' | 'cancelled'
+  contract_status: 'not_applicable' | 'pending' | 'signed'
+  payment_status: 'not_applicable' | 'pending' | 'partial' | 'paid' | 'overdue'
+  arrival_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  departure_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  team_size: number | null
+  confirmation_requested_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  confirmation_deadline_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  confirmed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  declined_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  notes: string | null
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
 export interface OutboxEventsTable {
   id: string
   organization_id: string
@@ -121,5 +160,7 @@ export interface DatabaseSchema {
   event_template_milestones: EventTemplateMilestonesTable
   event_tasks: EventTasksTable
   event_milestones: EventMilestonesTable
+  vendors: VendorsTable
+  event_vendors: EventVendorsTable
   outbox_events: OutboxEventsTable
 }
