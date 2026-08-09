@@ -1,0 +1,29 @@
+Event Command Center — Mini-feature 01
+Validation date: 2026-08-09
+
+PASSED
+- Bun workspace contract
+- compose.yaml YAML parsing and expected services
+- Postgres/API/worker/n8n/gateway dependency structure
+- health-gated startup structure
+- application DB vs n8n logical DB isolation
+- Event database invariants and tenant foreign key
+- Event + event.created transactional outbox boundary
+- full-project TypeScript structural compilation
+- shell entrypoint parsing
+- strict core domain/EventEngine compilation
+- EventEngine behavioral scenarios:
+  1. create event + event.created
+  2. reject end before start
+  3. reject negative guest count
+
+NOT EXECUTED IN BUILD ENVIRONMENT
+- docker compose up / image pulls / live Postgres and n8n boot
+  Reason: Docker and Bun are not installed in the artifact build environment.
+
+REPRODUCIBLE GLOBAL SMOKE TEST
+  cp .env.example .env
+  docker compose up --build -d
+  ./scripts/smoke.sh
+
+Expected: Smoke test passed.

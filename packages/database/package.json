@@ -1,0 +1,11 @@
+{
+  "name": "@ecc/database",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@ecc/domain": "workspace:*",
+    "kysely": "0.29.4",
+    "pg": "^8.16.3"
+  }
+}

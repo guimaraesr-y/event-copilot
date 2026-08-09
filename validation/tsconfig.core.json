@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "rootDir": "..",
+    "outDir": "../.validation-dist",
+    "noEmit": false,
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@ecc/domain": ["../packages/domain/src/index.ts"]
+    },
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": [
+    "../packages/domain/src/**/*.ts",
+    "../packages/event-engine/src/**/*.ts",
+    "./core-tests/**/*.ts"
+  ]
+}

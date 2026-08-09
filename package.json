@@ -1,0 +1,24 @@
+{
+  "name": "event-command-center",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "bun run --filter @ecc/api dev",
+    "start:api": "bun run --filter @ecc/api start",
+    "start:worker": "bun run --filter @ecc/worker start",
+    "db:migrate": "bun packages/database/src/migrate.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
+    "validate:foundation": "python3 scripts/validate_foundation.py"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.0"
+  },
+  "type": "module"
+}
