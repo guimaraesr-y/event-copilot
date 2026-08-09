@@ -1,4 +1,4 @@
-import { Migrator } from 'kysely'
+import { Migrator } from 'kysely/migration'
 import { createDatabase } from './database.ts'
 import { migration001Foundation } from './migrations/001_foundation.ts'
 

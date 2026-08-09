@@ -2,6 +2,7 @@
 set -eu
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+OUTBOX_WAIT_SECONDS="${OUTBOX_WAIT_SECONDS:-10}"
 
 printf '1/5 readiness... '
 curl -fsS "$BASE_URL/api/health/ready" >/dev/null
@@ -29,11 +30,25 @@ curl -fsS "$BASE_URL/api/v1/events/$EVENT_ID" -H "x-organization-id: $ORG_ID" >/
 echo OK
 
 printf '5/5 verify worker consumed event.created... '
-if docker compose logs worker | grep -q 'event.created'; then
-  echo OK
-else
-  echo 'worker did not log event.created'
-  exit 1
-fi
+ATTEMPT=0
+while [ "$ATTEMPT" -lt "$OUTBOX_WAIT_SECONDS" ]; do
+  DISPATCHED=$(docker compose exec -T postgres sh -c \
+    "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT CASE WHEN EXISTS (SELECT 1 FROM outbox_events WHERE event_type = 'event.created' AND aggregate_id = '$EVENT_ID'::uuid AND dispatched_at IS NOT NULL) THEN 'yes' ELSE 'no' END;\"" \
+    2>/dev/null | tr -d '\r[:space:]')
 
-echo 'Smoke test passed.'
+  if [ "$DISPATCHED" = "yes" ]; then
+    echo OK
+    echo 'Smoke test passed.'
+    exit 0
+  fi
+
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 1
+done
+
+echo "event.created was not marked as dispatched after ${OUTBOX_WAIT_SECONDS}s"
+echo 'Current outbox row:'
+docker compose exec -T postgres sh -c \
+  "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -x -c \"SELECT id, event_type, aggregate_id, attempts, claimed_by, claimed_at, dispatched_at, last_error FROM outbox_events WHERE event_type = 'event.created' AND aggregate_id = '$EVENT_ID'::uuid ORDER BY created_at DESC LIMIT 1;\"" \
+  || true
+exit 1
