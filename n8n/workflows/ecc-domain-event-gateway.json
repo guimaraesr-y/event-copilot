@@ -12,7 +12,10 @@
       "name": "Domain Event Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [-620, 0],
+      "position": [
+        -620,
+        0
+      ],
       "webhookId": "4b83281d-1fe8-42e1-98d6-88a3ae630001"
     },
     {
@@ -42,7 +45,10 @@
       "name": "Verify Domain Event",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [-380, 0]
+      "position": [
+        -380,
+        0
+      ]
     },
     {
       "parameters": {
@@ -72,7 +78,10 @@
       "name": "Is Vendor Confirmation Requested?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [-140, 0]
+      "position": [
+        -140,
+        0
+      ]
     },
     {
       "parameters": {
@@ -101,7 +110,21 @@
       "name": "Prepare Vendor Confirmation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [120, -100]
+      "position": [
+        120,
+        -100
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc005",
+      "name": "Acknowledge Unhandled Domain Event",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        120,
+        100
+      ]
     }
   ],
   "pinData": {},
@@ -137,7 +160,13 @@
             "index": 0
           }
         ],
-        []
+        [
+          {
+            "node": "Acknowledge Unhandled Domain Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
