@@ -135,6 +135,21 @@ export interface EventVendorsTable {
   updated_at: ColumnType<Date, Date | string, Date | string>
 }
 
+
+export interface AutomationActionsTable {
+  id: string
+  organization_id: string
+  source_outbox_event_id: string
+  source_event_type: string
+  aggregate_type: string
+  aggregate_id: string
+  action_type: string
+  status: 'prepared' | 'completed' | 'failed' | 'cancelled'
+  payload: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
 export interface OutboxEventsTable {
   id: string
   organization_id: string
@@ -162,5 +177,6 @@ export interface DatabaseSchema {
   event_milestones: EventMilestonesTable
   vendors: VendorsTable
   event_vendors: EventVendorsTable
+  automation_actions: AutomationActionsTable
   outbox_events: OutboxEventsTable
 }

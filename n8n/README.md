@@ -1,3 +1,15 @@
 # n8n workflows
 
-Workflow exports will live here. Mini-feature 01 intentionally starts n8n with no production workflow; the backend outbox worker uses the console transport until the first orchestration feature is introduced.
+Mini-feature 04 introduces the first production workflow:
+
+- `workflows/ecc-domain-event-gateway.json`
+
+Install/update it in the running n8n instance with:
+
+```bash
+./scripts/n8n-sync.sh
+```
+
+The sync script imports the workflow and publishes `eccDomainEventGw1`. No n8n credential contains the ECC HMAC secret: the worker signs every domain-event envelope, and the backend verifies that signature when n8n calls the internal API.
+
+The production webhook is internal-only and is not routed publicly by Caddy.

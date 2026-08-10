@@ -1,22 +1,32 @@
-Event Command Center — Mini-feature 03 validation
+Event Command Center — Mini-feature 04 validation
+Date: 2026-08-09
 
-Validated in this build environment:
-- Compose/YAML structural contract from mini-features 01/02
-- n8n remains on its isolated logical PostgreSQL database
-- Migrator uses `kysely/migration` and migration 003 is registered
-- migration 003 tenant-scoped FKs, confirmation constraints and unique assignment
-- event-vendor + outbox transaction boundaries
-- full TypeScript structural compilation using local validation shims
-- strict domain/EventEngine/VendorEngine compilation with local tsc
-- EventEngine behavioral suite: 8 scenarios
-- VendorEngine behavioral suite: 7 scenarios
-- shell syntax for smoke and PostgreSQL init scripts
-- smoke coverage for previous event planning plus vendor attach/request/confirm lifecycle
+Executed in packaging environment:
+- Mini-feature 04 structural validator: PASS
+- compose.yaml parse + required services: PASS
+- migration runner uses kysely/migration and registers 004: PASS
+- automation_actions idempotency constraints: PASS
+- versioned canonical domain-event envelope: PASS
+- worker HMAC dispatch contract: PASS
+- API HMAC/replay/outbox validation contract: PASS
+- n8n workflow JSON parse/node/connection contract: PASS
+- n8n sync uses import:workflow + publish:workflow: PASS
+- public Caddy boundary blocks orchestration-only routes: PASS
+- full structural TypeScript compilation with validation shims: PASS
+- strict Domain/EventEngine/VendorEngine compilation: PASS
+- EventEngine behavior: 8 scenarios PASS
+- VendorEngine behavior: 7 scenarios PASS
+- shell syntax (smoke/n8n-sync/postgres init): PASS
 
-Not executed here:
-- docker compose up / actual container startup, because Docker is not available in this execution environment.
+Not executable in this environment:
+- Docker Compose container startup
+- Bun runtime against installed workspace dependencies
+- real n8n workflow import/publish/execution
 
-Run locally:
-  cp .env.example .env
+Run on a Docker-enabled development machine:
   docker compose up --build -d
   ./scripts/smoke.sh
+
+The smoke imports/publishes the n8n gateway first, then proves:
+  transactional outbox -> signed worker delivery -> n8n -> API verification
+  -> one idempotent vendor_confirmation.prepare action -> dispatched_at.

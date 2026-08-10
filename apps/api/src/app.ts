@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Kysely } from 'kysely'
 import {
   checkDatabase,
+  DomainEventGatewayRepository,
   EventTemplateRepository,
   KyselyEventStore,
   KyselyVendorStore,
@@ -14,6 +15,7 @@ import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
 import { registerEventTemplateRoutes } from './routes/event-templates.ts'
 import { registerVendorRoutes } from './routes/vendors.ts'
+import { registerDomainEventRoutes } from './routes/domain-events.ts'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
   const app = new Hono()
@@ -21,6 +23,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const eventTemplateRepository = new EventTemplateRepository(db)
   const eventEngine = new EventEngine({ store: new KyselyEventStore(db) })
   const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
+  const domainEventGatewayRepository = new DomainEventGatewayRepository(db)
 
   app.onError((error, c) => {
     console.error('[api] unhandled error', error)
@@ -32,6 +35,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerEventTemplateRoutes(app, organizationRepository, eventTemplateRepository)
   registerEventRoutes(app, organizationRepository, eventEngine)
   registerVendorRoutes(app, organizationRepository, vendorEngine)
+  registerDomainEventRoutes(app, domainEventGatewayRepository)
 
   return app
 }

@@ -5,6 +5,13 @@ declare module 'node:os' {
   export function hostname(): string
 }
 
+declare module 'node:crypto' {
+  export function createHmac(...args: any[]): any
+  export function timingSafeEqual(...args: any[]): boolean
+}
+
+declare const Buffer: any
+
 declare module 'hono' {
   export class Hono<T = any> {
     fetch: any
@@ -21,6 +28,7 @@ declare module 'kysely' {
   export type Generated<T> = T
   export type JSONColumnType<S, I = S, U = S> = S
   export type Transaction<T = any> = any
+  export type Selectable<T> = T
   export const sql: any
   export class Kysely<T = any> {
     constructor(config: any)

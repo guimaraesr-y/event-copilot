@@ -3,3 +3,4 @@ export * from './events.ts'
 export * from './event-templates.ts'
 
 export * from './vendors.ts'
+export * from './domain-events.ts'

@@ -1,6 +1,10 @@
 :8080 {
   encode gzip
 
+  # Integration endpoints are Docker-network internal only.
+  respond /webhook/ecc-domain-events 404
+  respond /api/v1/internal/* 404
+
   handle /api/* {
     reverse_proxy api:3000
   }

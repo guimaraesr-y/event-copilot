@@ -1,182 +1,128 @@
-# Event Command Center — Mini-feature 02
+# Event Command Center — Mini-feature 04
 
-**Event Templates + automatic Tasks/Milestones**, built on top of mini-feature 01.
+**Domain Event Gateway + first real n8n workflow**, built on the Foundation, Event Planning and Vendor slices.
 
-The architecture remains intentionally backend-first: PostgreSQL is the source of truth, the backend owns business rules, and n8n is the orchestration boundary for external systems.
+PostgreSQL remains the source of truth, the backend owns business rules, and n8n is now an active orchestration boundary rather than a dormant container.
 
 ## What this slice adds
 
-- `event_templates`
-- template tasks with relative `offsetDays` + local `dueTime`
-- template milestones
-- `events.template_id` traceability
-- concrete `event_tasks`
-- concrete `event_milestones`
-- automatic template instantiation on event creation
-- organization-timezone-aware due-date calculation
-- `event.plan_initialized` domain event
-- manual event task creation/update lifecycle
-- `task.created`, `task.updated`, `task.completed`
-- tenant-scoped database constraints for planning entities
-- updated runtime smoke test
+- versioned domain-event envelope (`schemaVersion: 1`)
+- HMAC-SHA256 signing between the outbox worker and the ECC integration boundary
+- five-minute replay window for signatures
+- validation that delivered envelopes correspond to real outbox rows
+- `OUTBOX_TRANSPORT=n8n` as the Compose default
+- first importable/publishable n8n workflow
+- `automation_actions`
+- idempotent `vendor_confirmation.prepare`
+- internal-only n8n webhook/API routes at the Caddy boundary
+- n8n workflow sync script using `import:workflow` + `publish:workflow`
+- runtime smoke covering the complete `outbox → n8n → API → automation_actions` round-trip
 
-The existing foundation is preserved:
-
-- Bun + TypeScript monorepo
-- Hono API
-- Kysely + PostgreSQL 18
-- transactional outbox
-- outbox worker
-- n8n with an isolated logical PostgreSQL database
-- Caddy gateway
-- liveness/readiness checks
-
-## Core behavior
+## Delivery semantics
 
 ```text
-Event Template
-    │
-    ├── Template Tasks
-    └── Template Milestones
-             │
-             ▼
-       POST /events
-             │
-             ▼
-         EventEngine
-             │
-     ┌───────┼────────┐
-     ▼       ▼        ▼
-   Event    Tasks  Milestones
-     └───────┼────────┘
-             ▼
-           Outbox
-       event.created
- event.plan_initialized
+Business transaction
+      ↓
+transactional outbox
+      ↓
+worker claims event
+      ↓
+HMAC signed envelope
+      ↓
+n8n Webhook
+      ↓
+API verifies signature + outbox identity
+      ↓
+n8n routes event
+      ↓
+automation action prepared
+      ↓
+n8n HTTP 2xx
+      ↓
+worker sets dispatched_at
 ```
 
-All writes above happen in one PostgreSQL transaction.
-
-## Template snapshot rule
-
-Templates are blueprints, not live links.
-
-When an event is created, template tasks/milestones are copied into event-owned rows. Changing or deleting a template task afterward does **not** change the event plan that already exists.
-
-## Timezone semantics
-
-Relative dates are calculated as local calendar dates using `organization.timezone`.
-
-For an event on `17/10/2026` in `America/Sao_Paulo`:
+This is **at-least-once delivery**. Side effects must therefore be idempotent. The first action is protected by:
 
 ```text
-D-30 09:00 -> 17/09/2026 09:00 local -> 2026-09-17T12:00:00.000Z
-D-7  10:00 -> 10/10/2026 10:00 local -> 2026-10-10T13:00:00.000Z
-D-1  18:00 -> 16/10/2026 18:00 local -> 2026-10-16T21:00:00.000Z
+UNIQUE(source_outbox_event_id, action_type)
 ```
 
-See `docs/mini-feature-02.md` for the domain rules.
+## First workflow
+
+For ordinary domain events the gateway authenticates and acknowledges them. For:
+
+```text
+vendor.confirmation_requested
+```
+
+it prepares:
+
+```text
+vendor_confirmation.prepare
+```
+
+That row is the handoff point for Mini-feature 05, where the real WhatsApp message will be composed and sent.
 
 ## Run
 
-For an existing mini-feature 01 database, rebuild the application so the API startup runs migration `002_event_planning` automatically:
+Existing database:
 
 ```bash
 docker compose up --build -d
 ```
 
-For a fresh environment:
+Fresh environment:
 
 ```bash
 cp .env.example .env
 docker compose up --build -d
 ```
 
-Run the end-to-end smoke test:
+Install/publish the n8n workflow:
+
+```bash
+./scripts/n8n-sync.sh
+```
+
+Or run the full smoke; it syncs the workflow automatically:
 
 ```bash
 ./scripts/smoke.sh
 ```
 
-The smoke creates a new organization/template/event on every run. It intentionally does not clean test data.
+The smoke still intentionally creates fresh test data on every run.
 
-## Manual example
+## Security
 
-Create template:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/event-templates \
-  -H 'content-type: application/json' \
-  -H 'x-organization-id: <ORG_ID>' \
-  -d '{
-    "name":"Casamento Padrão",
-    "eventType":"wedding"
-  }'
-```
-
-Add D-30 task:
+Generate a real secret before non-local use:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/event-templates/<TEMPLATE_ID>/tasks \
-  -H 'content-type: application/json' \
-  -H 'x-organization-id: <ORG_ID>' \
-  -d '{
-    "title":"Fechar RSVP",
-    "offsetDays":-30,
-    "dueTime":"09:00",
-    "priority":"high",
-    "type":"guest"
-  }'
+openssl rand -hex 32
 ```
 
-Create event from it:
+Set it as `DOMAIN_EVENT_SHARED_SECRET` for both API and worker. The secret is never stored in the n8n workflow.
 
-```bash
-curl -X POST http://localhost:8080/api/v1/events \
-  -H 'content-type: application/json' \
-  -H 'x-organization-id: <ORG_ID>' \
-  -d '{
-    "name":"Ana & Pedro",
-    "type":"wedding",
-    "templateId":"<TEMPLATE_ID>",
-    "startAt":"2026-10-17T17:30:00-03:00",
-    "guestCount":132
-  }'
-```
-
-Read generated tasks:
-
-```bash
-curl http://localhost:8080/api/v1/events/<EVENT_ID>/tasks \
-  -H 'x-organization-id: <ORG_ID>'
-```
+`x-organization-id` is still development-only tenancy context and is not authentication.
 
 ## Validation
 
-Local static/core validation:
+Static/core regression:
 
 ```bash
-python3 scripts/validate_feature_02.py
+python3 scripts/validate_feature_04.py
 ```
 
-Runtime validation on your Docker-enabled machine:
+Runtime integration:
 
 ```bash
 ./scripts/smoke.sh
 ```
 
-The packaging environment has Node/TypeScript/Python but not Docker or Bun, so it validates strict core behavior, project structure, migrations/contracts and shell syntax here; actual container startup is intentionally delegated to the included smoke test.
-
-## Security boundary
-
-`x-organization-id` is still only a development tenancy context. It must eventually be derived from authentication rather than trusted from an arbitrary header.
+The packaging environment does not provide Docker or Bun, so container startup and real n8n execution remain covered by the included smoke test on a Docker-enabled machine.
 
 ## Next slice
 
-**Mini-feature 03 — Vendors + Event Vendors + confirmation state.**
+**Mini-feature 05 — WhatsApp Business + Vendor Confirmation delivery.**
 
-That gives the system its first external operational actor and prepares the first genuinely useful n8n workflow: supplier confirmation/reminders.
-
-## Mini-feature 03 — fornecedores
-
-A base agora inclui catálogo de fornecedores e vínculos operacionais por evento. O estado de confirmação é explícito (`pending`, `requested`, `confirmed`, `declined`, `cancelled`) e as mudanças relevantes são publicadas na transactional outbox. Veja `docs/mini-feature-03.md`.
+It will turn `vendor_confirmation.prepare` into an outbound message, record delivery state and begin processing supplier replies.

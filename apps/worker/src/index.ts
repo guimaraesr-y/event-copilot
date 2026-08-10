@@ -1,5 +1,7 @@
+import { createHmac } from 'node:crypto'
 import { hostname } from 'node:os'
 import { createDatabase, OutboxRepository } from '@ecc/database'
+import { canonicalizeDomainEvent, type DomainEventEnvelope } from '@ecc/contracts'
 import type { OutboxMessage } from '@ecc/domain'
 
 const db = createDatabase()
@@ -28,23 +30,34 @@ async function dispatch(message: OutboxMessage): Promise<void> {
 
   if (transport === 'n8n') {
     const url = process.env.N8N_DOMAIN_EVENTS_URL
+    const secret = process.env.DOMAIN_EVENT_SHARED_SECRET
     if (!url) throw new Error('N8N_DOMAIN_EVENTS_URL is required when OUTBOX_TRANSPORT=n8n')
+    if (!secret || secret.length < 32) throw new Error('DOMAIN_EVENT_SHARED_SECRET must contain at least 32 characters')
+
+    const envelope: DomainEventEnvelope = {
+      schemaVersion: 1,
+      id: message.id,
+      organizationId: message.organizationId,
+      eventType: message.eventType,
+      aggregateType: message.aggregateType,
+      aggregateId: message.aggregateId,
+      occurredAt: message.occurredAt.toISOString(),
+      payload: message.payload,
+    }
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    const signature = createHmac('sha256', secret)
+      .update(`${timestamp}.${canonicalizeDomainEvent(envelope)}`)
+      .digest('hex')
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-outbox-event-id': message.id,
+        'x-ecc-event-id': message.id,
+        'x-ecc-timestamp': timestamp,
+        'x-ecc-signature': `sha256=${signature}`,
       },
-      body: JSON.stringify({
-        id: message.id,
-        organizationId: message.organizationId,
-        eventType: message.eventType,
-        aggregateType: message.aggregateType,
-        aggregateId: message.aggregateId,
-        occurredAt: message.occurredAt.toISOString(),
-        payload: message.payload,
-      }),
+      body: JSON.stringify(envelope),
       signal: AbortSignal.timeout(15_000),
     })
 
