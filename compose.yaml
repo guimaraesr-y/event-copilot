@@ -27,6 +27,11 @@ services:
       API_PORT: ${API_PORT:-3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DOMAIN_EVENT_SHARED_SECRET: ${DOMAIN_EVENT_SHARED_SECRET:-development-domain-event-secret-change-me-32chars}
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-mock}
+      MESSAGING_WEBHOOK_SHARED_SECRET: ${MESSAGING_WEBHOOK_SHARED_SECRET:-development-messaging-webhook-secret-change-me-32chars}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-}
     depends_on:
       postgres:
         condition: service_healthy

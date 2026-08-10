@@ -1,21 +1,27 @@
 #!/usr/bin/env sh
 set -eu
 
-WORKFLOW_ID="eccDomainEventGw1"
-WORKFLOW_FILE="/files/n8n/workflows/ecc-domain-event-gateway.json"
 N8N_READY_WAIT_SECONDS="${N8N_READY_WAIT_SECONDS:-30}"
 
-printf 'Importing ECC Domain Event Gateway... '
-MSYS_NO_PATHCONV=1 docker compose exec -T n8n n8n import:workflow --input="$WORKFLOW_FILE" >/dev/null
-echo OK
+sync_workflow() {
+  id="$1"
+  file="$2"
+  label="$3"
 
-printf 'Publishing ECC Domain Event Gateway... '
-MSYS_NO_PATHCONV=1 docker compose exec -T n8n n8n publish:workflow --id="$WORKFLOW_ID" >/dev/null
-echo OK
+  printf 'Importing %s... ' "$label"
+  MSYS_NO_PATHCONV=1 docker compose exec -T n8n n8n import:workflow --input="$file" >/dev/null
+  echo OK
 
-# n8n's server CLI writes publish/unpublish changes directly to the database.
-# When the main n8n process is already running, production triggers/webhooks are
-# not re-registered until that process restarts.
+  printf 'Publishing %s... ' "$label"
+  docker compose exec -T n8n n8n publish:workflow --id="$id" >/dev/null
+  echo OK
+}
+
+sync_workflow "eccDomainEventGw1" "/files/n8n/workflows/ecc-domain-event-gateway.json" "ECC Domain Event Gateway"
+sync_workflow "eccWhatsAppStatusGw1" "/files/n8n/workflows/ecc-whatsapp-status-gateway.json" "ECC WhatsApp Status Gateway"
+
+# n8n CLI publication updates the database. Restart the runtime once after all
+# imports so production webhooks are registered from the published versions.
 printf 'Restarting n8n to register production webhooks... '
 docker compose restart n8n >/dev/null
 echo OK
@@ -29,7 +35,6 @@ while [ "$ATTEMPT" -lt "$N8N_READY_WAIT_SECONDS" ]; do
     echo OK
     exit 0
   fi
-
   ATTEMPT=$((ATTEMPT + 1))
   sleep 1
 done

@@ -10,7 +10,7 @@ export interface AutomationAction {
   aggregateType: string
   aggregateId: string
   actionType: string
-  status: 'prepared' | 'completed' | 'failed' | 'cancelled'
+  status: 'prepared' | 'processing' | 'completed' | 'failed' | 'cancelled'
   payload: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
@@ -35,6 +35,14 @@ export class DomainEventGatewayRepository {
   async prepareAction(envelope: DomainEventEnvelope, actionType: string): Promise<{ action: AutomationAction; created: boolean }> {
     const id = crypto.randomUUID()
     const now = new Date()
+    let payload = envelope.payload
+    if (actionType === 'vendor_confirmation.prepare' && typeof envelope.payload.eventId === 'string') {
+      const event = await this.db.selectFrom('events').select(['name', 'start_at'])
+        .where('organization_id', '=', envelope.organizationId)
+        .where('id', '=', envelope.payload.eventId)
+        .executeTakeFirst()
+      if (event) payload = { ...payload, eventName: event.name, eventStartAt: event.start_at.toISOString() }
+    }
     const inserted = await this.db
       .insertInto('automation_actions')
       .values({
@@ -46,7 +54,7 @@ export class DomainEventGatewayRepository {
         aggregate_id: envelope.aggregateId,
         action_type: actionType,
         status: 'prepared',
-        payload: envelope.payload,
+        payload,
         created_at: now,
         updated_at: now,
       })

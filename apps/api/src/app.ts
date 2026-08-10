@@ -6,16 +6,19 @@ import {
   EventTemplateRepository,
   KyselyEventStore,
   KyselyVendorStore,
+  KyselyMessageStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
 import { registerEventTemplateRoutes } from './routes/event-templates.ts'
 import { registerVendorRoutes } from './routes/vendors.ts'
 import { registerDomainEventRoutes } from './routes/domain-events.ts'
+import { registerMessagingRoutes } from './routes/messaging.ts'
+import { createMessagingProvider } from './messaging-provider.ts'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
   const app = new Hono()
@@ -24,6 +27,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const eventEngine = new EventEngine({ store: new KyselyEventStore(db) })
   const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
   const domainEventGatewayRepository = new DomainEventGatewayRepository(db)
+  const messagingEngine = new MessagingEngine({ store: new KyselyMessageStore(db), provider: createMessagingProvider() })
 
   app.onError((error, c) => {
     console.error('[api] unhandled error', error)
@@ -36,6 +40,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerEventRoutes(app, organizationRepository, eventEngine)
   registerVendorRoutes(app, organizationRepository, vendorEngine)
   registerDomainEventRoutes(app, domainEventGatewayRepository)
+  registerMessagingRoutes(app, messagingEngine)
 
   return app
 }

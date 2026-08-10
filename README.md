@@ -126,3 +126,15 @@ The packaging environment does not provide Docker or Bun, so container startup a
 **Mini-feature 05 — WhatsApp Business + Vendor Confirmation delivery.**
 
 It will turn `vendor_confirmation.prepare` into an outbound message, record delivery state and begin processing supplier replies.
+
+## Mini-feature 05 — Outbound Messaging
+
+`vendor.confirmation_requested` now traverses the complete durable path through n8n and creates/sends exactly one `outbound_messages` record. Local development uses `WHATSAPP_PROVIDER=mock`; see `docs/mini-feature-05.md` for the provider and status contracts.
+
+Run the full local integration smoke with:
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+./scripts/smoke.sh
+```

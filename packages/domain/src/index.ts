@@ -6,3 +6,5 @@ export * from './milestone.ts'
 export * from './template.ts'
 
 export * from './vendor.ts'
+
+export * from './message.ts'

@@ -1,15 +1,10 @@
 # n8n workflows
 
-Mini-feature 04 introduces the first production workflow:
+Mini-feature 05 ships two stable workflow exports:
 
-- `workflows/ecc-domain-event-gateway.json`
+- `ECC - Domain Event Gateway` (`eccDomainEventGw1`): verifies signed domain events, prepares vendor-confirmation automation actions, creates the durable outbound message, and invokes the configured provider.
+- `ECC - WhatsApp Status Gateway` (`eccWhatsAppStatusGw1`): receives signed provider-neutral delivery callbacks and persists `sent/delivered/read/failed` state through the API.
 
-Install/update it in the running n8n instance with:
+Use `./scripts/n8n-sync.sh` after the n8n container is healthy. The script imports and publishes both workflows, then restarts n8n once so production webhooks are registered.
 
-```bash
-./scripts/n8n-sync.sh
-```
-
-The sync script imports the workflow and publishes `eccDomainEventGw1`. No n8n credential contains the ECC HMAC secret: the worker signs every domain-event envelope, and the backend verifies that signature when n8n calls the internal API.
-
-The production webhook is internal-only and is not routed publicly by Caddy.
+The domain-event webhook is Docker-network internal. The WhatsApp/provider status webhook is intentionally reachable through the n8n gateway for callback simulation and future provider adapters, but the API endpoint behind it is still internal and validates a timestamped HMAC.

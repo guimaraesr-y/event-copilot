@@ -125,6 +125,36 @@
         120,
         100
       ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api:3000/api/v1/internal/automation-actions/' + $json.actionId + '/outbound-message' }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc006",
+      "name": "Create Outbound Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        360,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api:3000/api/v1/internal/outbound-messages/' + $json.message.id + '/send' }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc007",
+      "name": "Send Outbound Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        600,
+        -100
+      ]
     }
   ],
   "pinData": {},
@@ -163,6 +193,28 @@
         [
           {
             "node": "Acknowledge Unhandled Domain Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vendor Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Create Outbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Outbound Message": {
+      "main": [
+        [
+          {
+            "node": "Send Outbound Message",
             "type": "main",
             "index": 0
           }

@@ -144,10 +144,33 @@ export interface AutomationActionsTable {
   aggregate_type: string
   aggregate_id: string
   action_type: string
-  status: 'prepared' | 'completed' | 'failed' | 'cancelled'
+  status: 'prepared' | 'processing' | 'completed' | 'failed' | 'cancelled'
   payload: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
   created_at: ColumnType<Date, Date | string, never>
   updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
+export interface OutboundMessagesTable {
+  id: string
+  organization_id: string
+  source_action_id: string
+  channel: 'whatsapp' | 'email' | 'sms'
+  provider: 'mock' | 'meta'
+  recipient: string
+  message_type: string
+  aggregate_type: string
+  aggregate_id: string
+  status: 'pending' | 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
+  external_message_id: string | null
+  payload: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  provider_response: JSONColumnType<Record<string, unknown> | null, Record<string, unknown> | null, Record<string, unknown> | null>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  sent_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  delivered_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  read_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  failed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  last_error: string | null
 }
 
 export interface OutboxEventsTable {
@@ -178,5 +201,6 @@ export interface DatabaseSchema {
   vendors: VendorsTable
   event_vendors: EventVendorsTable
   automation_actions: AutomationActionsTable
+  outbound_messages: OutboundMessagesTable
   outbox_events: OutboxEventsTable
 }

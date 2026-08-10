@@ -1,0 +1,78 @@
+{
+  "name": "ECC - WhatsApp Status Gateway",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ecc-whatsapp-status",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "f0500000-0000-4000-8000-000000000001",
+      "name": "WhatsApp Status Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -300,
+        0
+      ],
+      "webhookId": "f0500000-0000-4000-8000-000000000011"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/outbound-messages/provider-status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ecc-timestamp",
+              "value": "={{ $('WhatsApp Status Webhook').item.json.headers['x-ecc-timestamp'] }}"
+            },
+            {
+              "name": "x-ecc-signature",
+              "value": "={{ $('WhatsApp Status Webhook').item.json.headers['x-ecc-signature'] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('WhatsApp Status Webhook').item.json.body) }}",
+        "options": {}
+      },
+      "id": "f0500000-0000-4000-8000-000000000002",
+      "name": "Apply Provider Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -40,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "WhatsApp Status Webhook": {
+      "main": [
+        [
+          {
+            "node": "Apply Provider Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f0500000-0000-4000-8000-000000000099",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "eccWhatsAppStatusGw1",
+  "tags": []
+}

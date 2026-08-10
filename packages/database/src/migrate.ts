@@ -4,6 +4,7 @@ import { migration001Foundation } from './migrations/001_foundation.ts'
 import { migration002EventPlanning } from './migrations/002_event_planning.ts'
 import { migration003Vendors } from './migrations/003_vendors.ts'
 import { migration004DomainEventGateway } from './migrations/004_domain_event_gateway.ts'
+import { migration005OutboundMessaging } from './migrations/005_outbound_messaging.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -15,6 +16,7 @@ const migrator = new Migrator({
         '002_event_planning': migration002EventPlanning,
         '003_vendors': migration003Vendors,
         '004_domain_event_gateway': migration004DomainEventGateway,
+        '005_outbound_messaging': migration005OutboundMessaging,
       }
     },
   },

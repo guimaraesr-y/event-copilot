@@ -1,32 +1,24 @@
-Event Command Center — Mini-feature 04 validation
-Date: 2026-08-09
+Event Command Center — Mini-feature 05 validation
 
-Executed in packaging environment:
-- Mini-feature 04 structural validator: PASS
-- compose.yaml parse + required services: PASS
-- migration runner uses kysely/migration and registers 004: PASS
-- automation_actions idempotency constraints: PASS
-- versioned canonical domain-event envelope: PASS
-- worker HMAC dispatch contract: PASS
-- API HMAC/replay/outbox validation contract: PASS
-- n8n workflow JSON parse/node/connection contract: PASS
-- n8n sync uses import:workflow + publish:workflow: PASS
-- public Caddy boundary blocks orchestration-only routes: PASS
-- full structural TypeScript compilation with validation shims: PASS
-- strict Domain/EventEngine/VendorEngine compilation: PASS
-- EventEngine behavior: 8 scenarios PASS
-- VendorEngine behavior: 7 scenarios PASS
-- shell syntax (smoke/n8n-sync/postgres init): PASS
+Executed in the build environment:
+- compose/YAML structural validation
+- migrations 001..005 registration validation
+- Kysely Migrator import from kysely/migration
+- outbound_messages constraints/idempotency contract validation
+- Domain Event Gateway JSON structure validation
+- WhatsApp Status Gateway JSON structure validation
+- n8n import/publish/restart script validation
+- Caddy internal boundary validation
+- full structural TypeScript compilation
+- strict core TypeScript compilation
+- shell syntax validation
+- EventEngine behavioral tests: 8/8
+- VendorEngine behavioral tests: 7/7
+- MessagingEngine behavioral tests: 6/6
+- ZIP integrity validation
 
-Not executable in this environment:
-- Docker Compose container startup
-- Bun runtime against installed workspace dependencies
-- real n8n workflow import/publish/execution
+Not executable in this build environment:
+- docker compose up / real n8n runtime execution (Docker is unavailable here)
+- Meta WhatsApp Cloud send (requires user credentials and a configured Graph API version)
 
-Run on a Docker-enabled development machine:
-  docker compose up --build -d
-  ./scripts/smoke.sh
-
-The smoke imports/publishes the n8n gateway first, then proves:
-  transactional outbox -> signed worker delivery -> n8n -> API verification
-  -> one idempotent vendor_confirmation.prepare action -> dispatched_at.
+The included scripts/smoke.sh is the authoritative local integration test. It uses WHATSAPP_PROVIDER=mock and validates outbox -> n8n -> automation action -> outbound message -> mock send -> delivery/read callbacks -> global outbox acknowledgement.
