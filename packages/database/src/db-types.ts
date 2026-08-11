@@ -173,6 +173,21 @@ export interface OutboundMessagesTable {
   last_error: string | null
 }
 
+
+export interface MessagingWebhookEventsTable {
+  id: string
+  provider: 'mock' | 'meta'
+  external_event_id: string
+  event_type: 'message.status' | 'message.received'
+  status: 'received' | 'processed' | 'ignored' | 'failed'
+  payload_hash: string
+  canonical_payload: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  raw_payload: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  received_at: ColumnType<Date, Date | string, Date | string>
+  processed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  last_error: string | null
+}
+
 export interface OutboxEventsTable {
   id: string
   organization_id: string
@@ -202,5 +217,6 @@ export interface DatabaseSchema {
   event_vendors: EventVendorsTable
   automation_actions: AutomationActionsTable
   outbound_messages: OutboundMessagesTable
+  messaging_webhook_events: MessagingWebhookEventsTable
   outbox_events: OutboxEventsTable
 }

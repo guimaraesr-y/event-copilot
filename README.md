@@ -1,140 +1,129 @@
-# Event Command Center — Mini-feature 04
+# Event Command Center
 
-**Domain Event Gateway + first real n8n workflow**, built on the Foundation, Event Planning and Vendor slices.
+Mini-feature **05.1 — Generic Messaging Webhooks**, built on the durable outbound-messaging slice.
 
-PostgreSQL remains the source of truth, the backend owns business rules, and n8n is now an active orchestration boundary rather than a dormant container.
-
-## What this slice adds
-
-- versioned domain-event envelope (`schemaVersion: 1`)
-- HMAC-SHA256 signing between the outbox worker and the ECC integration boundary
-- five-minute replay window for signatures
-- validation that delivered envelopes correspond to real outbox rows
-- `OUTBOX_TRANSPORT=n8n` as the Compose default
-- first importable/publishable n8n workflow
-- `automation_actions`
-- idempotent `vendor_confirmation.prepare`
-- internal-only n8n webhook/API routes at the Caddy boundary
-- n8n workflow sync script using `import:workflow` + `publish:workflow`
-- runtime smoke covering the complete `outbox → n8n → API → automation_actions` round-trip
-
-## Delivery semantics
+## Current architecture
 
 ```text
-Business transaction
-      ↓
-transactional outbox
-      ↓
-worker claims event
-      ↓
-HMAC signed envelope
-      ↓
-n8n Webhook
-      ↓
-API verifies signature + outbox identity
-      ↓
-n8n routes event
-      ↓
-automation action prepared
-      ↓
-n8n HTTP 2xx
-      ↓
-worker sets dispatched_at
+Event/Vendor Engine
+  ↓
+Transactional Outbox
+  ↓
+Worker
+  ↓
+n8n Domain Event Gateway
+  ↓
+Automation Action
+  ↓
+OutboundMessage
+  ↓
+MessagingProvider (mock | meta)
 ```
 
-This is **at-least-once delivery**. Side effects must therefore be idempotent. The first action is protected by:
+Provider callbacks use the opposite boundary:
 
 ```text
-UNIQUE(source_outbox_event_id, action_type)
+Provider
+  ↓
+POST /api/v1/messaging/webhooks/:provider
+  ↓
+MessagingWebhookAdapter
+  ↓
+CanonicalMessagingWebhookEvent
+  ↓
+MessagingEngine
+  ↓
+Postgres / Outbox
 ```
 
-## First workflow
+n8n is an orchestrator. It does not parse provider-specific webhook payloads.
 
-For ordinary domain events the gateway authenticates and acknowledges them. For:
+## Supported messaging providers
+
+- `mock` — deterministic local/smoke provider.
+- `meta` — Meta WhatsApp Cloud API.
+
+Set:
+
+```env
+WHATSAPP_PROVIDER=mock
+```
+
+for local development.
+
+## Generic webhook endpoint
 
 ```text
-vendor.confirmation_requested
+GET  /api/v1/messaging/webhooks/:provider
+POST /api/v1/messaging/webhooks/:provider
 ```
 
-it prepares:
+`GET` is used only by providers that require verification challenges, such as Meta.
+
+`POST` preserves the exact raw body before delegating to a `MessagingWebhookAdapter`.
+
+Adapters currently implemented:
+
+- `MockMessagingWebhookAdapter`
+- `MetaWhatsAppWebhookAdapter`
+
+The domain only receives canonical events:
 
 ```text
-vendor_confirmation.prepare
+message.status
+message.received
 ```
 
-That row is the handoff point for Mini-feature 05, where the real WhatsApp message will be composed and sent.
+`message.received` is already normalized and durably persisted but is intentionally left for Mini-feature 06.
 
-## Run
+## Webhook durability
 
-Existing database:
+Migration `006_messaging_webhooks` creates `messaging_webhook_events`. Migration `007_restrict_messaging_providers` keeps upgrades from earlier 05.1 builds restricted to the current provider set. Webhook idempotency is enforced by:
 
-```bash
-docker compose up --build -d
+```text
+UNIQUE(provider, external_event_id)
 ```
 
-Fresh environment:
+This makes provider retries idempotent.
+
+A status receipt that is already `processed` is terminal. `ignored`/`failed` status receipts can be retried so an early callback is not lost if it arrives before `external_message_id` is committed.
+
+## Meta configuration
+
+For real Meta WhatsApp Cloud usage:
+
+```env
+WHATSAPP_PROVIDER=meta
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+META_GRAPH_API_VERSION=
+META_GRAPH_API_BASE_URL=https://graph.facebook.com
+META_APP_SECRET=
+META_WEBHOOK_VERIFY_TOKEN=
+```
+
+Configure the Meta webhook against:
+
+```text
+https://<your-host>/api/v1/messaging/webhooks/meta
+```
+
+## Local validation
 
 ```bash
 cp .env.example .env
 docker compose up --build -d
+./scripts/smoke.sh
 ```
 
-Install/publish the n8n workflow:
+The smoke uses `mock`, so no external WhatsApp account is required.
+
+The n8n workflow is imported/published by:
 
 ```bash
 ./scripts/n8n-sync.sh
 ```
 
-Or run the full smoke; it syncs the workflow automatically:
+## Important boundary
 
-```bash
-./scripts/smoke.sh
-```
-
-The smoke still intentionally creates fresh test data on every run.
-
-## Security
-
-Generate a real secret before non-local use:
-
-```bash
-openssl rand -hex 32
-```
-
-Set it as `DOMAIN_EVENT_SHARED_SECRET` for both API and worker. The secret is never stored in the n8n workflow.
-
-`x-organization-id` is still development-only tenancy context and is not authentication.
-
-## Validation
-
-Static/core regression:
-
-```bash
-python3 scripts/validate_feature_04.py
-```
-
-Runtime integration:
-
-```bash
-./scripts/smoke.sh
-```
-
-The packaging environment does not provide Docker or Bun, so container startup and real n8n execution remain covered by the included smoke test on a Docker-enabled machine.
-
-## Next slice
-
-**Mini-feature 05 — WhatsApp Business + Vendor Confirmation delivery.**
-
-It will turn `vendor_confirmation.prepare` into an outbound message, record delivery state and begin processing supplier replies.
-
-## Mini-feature 05 — Outbound Messaging
-
-`vendor.confirmation_requested` now traverses the complete durable path through n8n and creates/sends exactly one `outbound_messages` record. Local development uses `WHATSAPP_PROVIDER=mock`; see `docs/mini-feature-05.md` for the provider and status contracts.
-
-Run the full local integration smoke with:
-
-```bash
-cp .env.example .env
-docker compose up --build -d
-./scripts/smoke.sh
-```
+Postgres is the source of truth. Business state transitions belong to the backend. n8n performs orchestration and external integration, while provider adapters own provider-specific verification and normalization.

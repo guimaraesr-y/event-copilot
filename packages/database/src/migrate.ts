@@ -5,6 +5,8 @@ import { migration002EventPlanning } from './migrations/002_event_planning.ts'
 import { migration003Vendors } from './migrations/003_vendors.ts'
 import { migration004DomainEventGateway } from './migrations/004_domain_event_gateway.ts'
 import { migration005OutboundMessaging } from './migrations/005_outbound_messaging.ts'
+import { migration006MessagingWebhooks } from './migrations/006_messaging_webhooks.ts'
+import { migration007RestrictMessagingProviders } from './migrations/007_restrict_messaging_providers.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -17,6 +19,8 @@ const migrator = new Migrator({
         '003_vendors': migration003Vendors,
         '004_domain_event_gateway': migration004DomainEventGateway,
         '005_outbound_messaging': migration005OutboundMessaging,
+        '006_messaging_webhooks': migration006MessagingWebhooks,
+        '007_restrict_messaging_providers': migration007RestrictMessagingProviders,
       }
     },
   },

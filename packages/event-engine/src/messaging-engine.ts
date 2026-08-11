@@ -1,5 +1,6 @@
 import type {
   AutomationActionRef,
+  CanonicalMessagingWebhookEvent,
   DomainEvent,
   MessageStore,
   MessagingProvider,
@@ -147,6 +148,46 @@ export class MessagingEngine {
     }, input.occurredAt))
     if (!result) throw new OutboundMessageNotFoundError('No outbound message matches this provider message id')
     return result
+  }
+
+
+  async handleWebhookEvent(input: { event: CanonicalMessagingWebhookEvent; payloadHash: string; rawPayload: Record<string, unknown>; receivedAt?: Date }): Promise<{ duplicate: boolean; handled: boolean; status: string }> {
+    const receivedAt = input.receivedAt ?? this.now()
+    const registered = await this.store.registerWebhookEvent({ event: input.event, payloadHash: input.payloadHash, rawPayload: input.rawPayload, receivedAt })
+    const duplicate = !registered.created
+
+    if (input.event.type === 'message.received') {
+      // Persisted and normalized now; Feature 06 will resolve conversation/vendor and consume it.
+      // Duplicate inbound deliveries do not need to enqueue the same canonical message again.
+      return { duplicate, handled: false, status: registered.receipt.status }
+    }
+
+    // message.status is safe to retry while the receipt is not terminal. This matters when
+    // provider callbacks race the local transaction that stores externalMessageId, or when
+    // processing failed after the durable receipt was inserted.
+    if (duplicate && registered.receipt.status === 'processed') {
+      return { duplicate: true, handled: true, status: 'processed' }
+    }
+
+    try {
+      const result = await this.applyProviderStatus({
+        provider: input.event.provider,
+        externalMessageId: input.event.externalMessageId,
+        status: input.event.status,
+        occurredAt: input.event.occurredAt,
+        raw: input.event.raw,
+      })
+      await this.store.markWebhookEventProcessed(registered.receipt.id, this.now())
+      return { duplicate, handled: true, status: result.changed ? 'processed' : 'processed' }
+    } catch (error) {
+      if (error instanceof OutboundMessageNotFoundError) {
+        await this.store.markWebhookEventIgnored(registered.receipt.id, error.message, this.now())
+        return { duplicate, handled: false, status: 'ignored' }
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      await this.store.markWebhookEventFailed(registered.receipt.id, message, this.now())
+      throw error
+    }
   }
 
   getMessage(messageId: string): Promise<OutboundMessage | null> {

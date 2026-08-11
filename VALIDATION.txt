@@ -1,24 +1,24 @@
-Event Command Center — Mini-feature 05 validation
+Mini-feature 05.1 — Generic Messaging Webhooks
 
-Executed in the build environment:
-- compose/YAML structural validation
-- migrations 001..005 registration validation
-- Kysely Migrator import from kysely/migration
-- outbound_messages constraints/idempotency contract validation
-- Domain Event Gateway JSON structure validation
-- WhatsApp Status Gateway JSON structure validation
-- n8n import/publish/restart script validation
-- Caddy internal boundary validation
-- full structural TypeScript compilation
-- strict core TypeScript compilation
-- shell syntax validation
-- EventEngine behavioral tests: 8/8
-- VendorEngine behavioral tests: 7/7
-- MessagingEngine behavioral tests: 6/6
-- ZIP integrity validation
+Validated in this package:
+- Compose/YAML structural contract with postgres/api/worker/n8n/gateway
+- migrations 001 through 007 registered by the non-deprecated Kysely migration API
+- provider type contracts restricted to mock + meta
+- generic raw-body webhook route
+- mock HMAC verification
+- Meta GET challenge and X-Hub-Signature-256 verification
+- canonical message.status + message.received normalization
+- durable/idempotent messaging_webhook_events storage
+- retry behavior for ignored/failed status receipts
+- provider-neutral n8n Domain Event Gateway
+- shell syntax
+- TypeScript structural and strict core compilation
+- EventEngine/VendorEngine/MessagingEngine regression scenarios
+- MessagingWebhookAdapter behavioral scenarios
 
-Not executable in this build environment:
-- docker compose up / real n8n runtime execution (Docker is unavailable here)
-- Meta WhatsApp Cloud send (requires user credentials and a configured Graph API version)
+Not executable in this environment:
+- Docker Compose runtime
+- live n8n runtime
+- live Meta WhatsApp Cloud delivery
 
-The included scripts/smoke.sh is the authoritative local integration test. It uses WHATSAPP_PROVIDER=mock and validates outbox -> n8n -> automation action -> outbound message -> mock send -> delivery/read callbacks -> global outbox acknowledgement.
+Use ./scripts/smoke.sh on a Docker-enabled machine for the global infrastructure round trip.

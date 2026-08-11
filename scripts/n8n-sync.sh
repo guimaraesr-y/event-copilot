@@ -18,7 +18,6 @@ sync_workflow() {
 }
 
 sync_workflow "eccDomainEventGw1" "/files/n8n/workflows/ecc-domain-event-gateway.json" "ECC Domain Event Gateway"
-sync_workflow "eccWhatsAppStatusGw1" "/files/n8n/workflows/ecc-whatsapp-status-gateway.json" "ECC WhatsApp Status Gateway"
 
 # n8n CLI publication updates the database. Restart the runtime once after all
 # imports so production webhooks are registered from the published versions.

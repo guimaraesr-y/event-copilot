@@ -1,10 +1,23 @@
 # n8n workflows
 
-Mini-feature 05 ships two stable workflow exports:
+n8n is the orchestration layer, not the messaging-provider webhook parser.
 
-- `ECC - Domain Event Gateway` (`eccDomainEventGw1`): verifies signed domain events, prepares vendor-confirmation automation actions, creates the durable outbound message, and invokes the configured provider.
-- `ECC - WhatsApp Status Gateway` (`eccWhatsAppStatusGw1`): receives signed provider-neutral delivery callbacks and persists `sent/delivered/read/failed` state through the API.
+## Published workflow
 
-Use `./scripts/n8n-sync.sh` after the n8n container is healthy. The script imports and publishes both workflows, then restarts n8n once so production webhooks are registered.
+- `ECC - Domain Event Gateway`: consumes signed ECC outbox events.
+  - `vendor.confirmation_requested` prepares and sends the outbound vendor-confirmation message.
+  - other verified domain events are explicitly acknowledged.
 
-The domain-event webhook is Docker-network internal. The WhatsApp/provider status webhook is intentionally reachable through the n8n gateway for callback simulation and future provider adapters, but the API endpoint behind it is still internal and validates a timestamped HMAC.
+## Generic messaging webhooks
+
+Provider callbacks do **not** enter n8n first.
+
+They are received by:
+
+`POST /api/v1/messaging/webhooks/:provider`
+
+The API preserves the raw request body, delegates verification/parsing to the selected adapter (`mock` or `meta`), persists the canonical webhook event idempotently, and lets the `MessagingEngine` apply status transitions.
+
+Any resulting ECC domain events (`message.delivered`, `message.read`, etc.) return to n8n through the regular Domain Event Gateway.
+
+This keeps provider-specific payloads and signatures out of workflows and makes inbound messaging reusable for Feature 06.

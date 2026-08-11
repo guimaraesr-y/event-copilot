@@ -18,7 +18,8 @@ import { registerEventTemplateRoutes } from './routes/event-templates.ts'
 import { registerVendorRoutes } from './routes/vendors.ts'
 import { registerDomainEventRoutes } from './routes/domain-events.ts'
 import { registerMessagingRoutes } from './routes/messaging.ts'
-import { createMessagingProvider } from './messaging-provider.ts'
+import { registerMessagingWebhookRoutes } from './routes/messaging-webhooks.ts'
+import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
   const app = new Hono()
@@ -41,6 +42,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerVendorRoutes(app, organizationRepository, vendorEngine)
   registerDomainEventRoutes(app, domainEventGatewayRepository)
   registerMessagingRoutes(app, messagingEngine)
+  registerMessagingWebhookRoutes(app, messagingEngine, createMessagingWebhookRegistry())
 
   return app
 }

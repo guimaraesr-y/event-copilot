@@ -7,6 +7,7 @@ declare module 'node:os' {
 
 declare module 'node:crypto' {
   export function createHmac(...args: any[]): any
+  export function createHash(...args: any[]): any
   export function timingSafeEqual(...args: any[]): boolean
 }
 

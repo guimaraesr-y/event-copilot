@@ -1,5 +1,8 @@
 # Mini-feature 05 — Outbound Messaging + WhatsApp
 
+> **Superseded webhook boundary:** Mini-feature 05.1 replaces the provider-status n8n workflow described below with the generic API endpoint `/api/v1/messaging/webhooks/:provider` and provider adapters. The outbound lifecycle from this slice remains valid.
+
+
 This slice turns `vendor.confirmation_requested` into a durable outbound WhatsApp message.
 
 ## Runtime path

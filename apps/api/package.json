@@ -12,6 +12,7 @@
     "@ecc/domain": "workspace:*",
     "@ecc/event-engine": "workspace:*",
     "hono": "4.13.1",
-    "zod": "4.4.1"
+    "zod": "4.4.1",
+    "@ecc/messaging": "workspace:*"
   }
 }

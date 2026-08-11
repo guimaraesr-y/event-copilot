@@ -63,6 +63,61 @@ export interface ProviderStatusInput {
   raw?: Record<string, unknown>
 }
 
+
+export type MessagingWebhookEventStatus = 'received' | 'processed' | 'ignored' | 'failed'
+
+export type CanonicalMessageContent =
+  | { type: 'text'; text: string }
+  | { type: 'media'; mediaType: string; mediaId: string | null; caption: string | null }
+
+export type CanonicalMessagingWebhookEvent =
+  | {
+      type: 'message.status'
+      provider: MessageProviderName
+      externalEventId: string
+      externalMessageId: string
+      status: ProviderMessageStatus
+      occurredAt: Date
+      raw: Record<string, unknown>
+    }
+  | {
+      type: 'message.received'
+      provider: MessageProviderName
+      externalEventId: string
+      externalMessageId: string
+      sender: string
+      recipient: string | null
+      occurredAt: Date
+      content: CanonicalMessageContent
+      raw: Record<string, unknown>
+    }
+
+export interface MessagingWebhookReceipt {
+  id: string
+  provider: MessageProviderName
+  externalEventId: string
+  eventType: CanonicalMessagingWebhookEvent['type']
+  status: MessagingWebhookEventStatus
+  payloadHash: string
+  canonicalPayload: Record<string, unknown>
+  rawPayload: Record<string, unknown>
+  receivedAt: Date
+  processedAt: Date | null
+  lastError: string | null
+}
+
+export interface RegisterWebhookEventInput {
+  event: CanonicalMessagingWebhookEvent
+  payloadHash: string
+  rawPayload: Record<string, unknown>
+  receivedAt: Date
+}
+
+export interface RegisterWebhookEventResult {
+  receipt: MessagingWebhookReceipt
+  created: boolean
+}
+
 export interface ClaimMessageResult {
   state: 'claimed' | 'already_sent' | 'in_progress'
   message: OutboundMessage
@@ -79,6 +134,10 @@ export interface MessageStore {
   applyProviderStatus(input: ProviderStatusInput, domainEvent: DomainEvent): Promise<{ message: OutboundMessage; changed: boolean } | null>
   findMessageById(messageId: string): Promise<OutboundMessage | null>
   findMessageByExternalId(provider: MessageProviderName, externalMessageId: string): Promise<OutboundMessage | null>
+  registerWebhookEvent(input: RegisterWebhookEventInput): Promise<RegisterWebhookEventResult>
+  markWebhookEventProcessed(id: string, at: Date): Promise<void>
+  markWebhookEventIgnored(id: string, reason: string, at: Date): Promise<void>
+  markWebhookEventFailed(id: string, error: string, at: Date): Promise<void>
 }
 
 export class MessagingValidationError extends Error {

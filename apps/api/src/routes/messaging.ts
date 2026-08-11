@@ -1,6 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Hono } from 'hono'
-import { canonicalizeProviderStatus, providerStatusSchema, type ProviderStatusPayload } from '@ecc/contracts'
 import type { MessagingEngine } from '@ecc/event-engine'
 import {
   AutomationActionNotFoundError,
@@ -9,8 +7,6 @@ import {
   MessagingValidationError,
   OutboundMessageNotFoundError,
 } from '@ecc/domain'
-
-const MAX_SIGNATURE_AGE_SECONDS = 300
 
 export function registerMessagingRoutes(app: Hono, engine: MessagingEngine): void {
   app.post('/api/v1/internal/automation-actions/:actionId/outbound-message', async (c) => {
@@ -31,33 +27,6 @@ export function registerMessagingRoutes(app: Hono, engine: MessagingEngine): voi
     const message = await engine.getMessage(c.req.param('messageId'))
     return message ? c.json({ message: serialize(message) }) : c.json({ error: { code: 'OUTBOUND_MESSAGE_NOT_FOUND', message: 'Outbound message not found' } }, 404)
   })
-
-  app.post('/api/v1/internal/outbound-messages/provider-status', async (c) => {
-    const parsed = providerStatusSchema.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json({ error: { code: 'INVALID_PROVIDER_STATUS', message: 'Invalid provider status payload' } }, 400)
-    const authError = verifyProviderSignature(c.req.header('x-ecc-timestamp'), c.req.header('x-ecc-signature'), parsed.data)
-    if (authError) return c.json({ error: { code: 'INVALID_PROVIDER_SIGNATURE', message: authError } }, 401)
-    try {
-      const result = await engine.applyProviderStatus({ ...parsed.data, occurredAt: new Date(parsed.data.occurredAt) })
-      return c.json({ message: serialize(result.message), duplicate: !result.changed })
-    } catch (error) { return mapError(c, error) }
-  })
-}
-
-function verifyProviderSignature(timestampHeader: string | undefined, signatureHeader: string | undefined, payload: ProviderStatusPayload): string | null {
-  const secret = process.env.MESSAGING_WEBHOOK_SHARED_SECRET
-  if (!secret || secret.length < 32) return 'MESSAGING_WEBHOOK_SHARED_SECRET must contain at least 32 characters'
-  if (!timestampHeader || !/^\d+$/.test(timestampHeader)) return 'Missing or invalid x-ecc-timestamp'
-  if (!signatureHeader?.startsWith('sha256=')) return 'Missing or invalid x-ecc-signature'
-  const timestamp = Number(timestampHeader)
-  const now = Math.floor(Date.now() / 1000)
-  if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > MAX_SIGNATURE_AGE_SECONDS) return 'Provider status signature has expired'
-  const expectedHex = createHmac('sha256', secret).update(`${timestampHeader}.${canonicalizeProviderStatus(payload)}`).digest('hex')
-  const providedHex = signatureHeader.slice('sha256='.length)
-  if (!/^[a-f0-9]{64}$/i.test(providedHex)) return 'Invalid provider status signature'
-  const expected = Buffer.from(expectedHex, 'hex')
-  const provided = Buffer.from(providedHex, 'hex')
-  return expected.length === provided.length && timingSafeEqual(expected, provided) ? null : 'Invalid provider status signature'
 }
 
 function serialize(message: any) {
