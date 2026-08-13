@@ -155,6 +155,54 @@
         600,
         -100
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0743fd14-53bd-4661-ab23-cef89cf30002",
+              "leftValue": "={{ $('Domain Event Webhook').item.json.body.eventType }}",
+              "rightValue": "message.received",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc008",
+      "name": "Is Supplier Inbound Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        120,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api:3000/api/v1/internal/inbound-messages/' + $('Domain Event Webhook').item.json.body.aggregateId + '/process' }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc009",
+      "name": "Process Supplier Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        60
+      ]
     }
   ],
   "pinData": {},
@@ -192,7 +240,7 @@
         ],
         [
           {
-            "node": "Acknowledge Unhandled Domain Event",
+            "node": "Is Supplier Inbound Message?",
             "type": "main",
             "index": 0
           }
@@ -215,6 +263,24 @@
         [
           {
             "node": "Send Outbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Supplier Inbound Message?": {
+      "main": [
+        [
+          {
+            "node": "Process Supplier Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge Unhandled Domain Event",
             "type": "main",
             "index": 0
           }

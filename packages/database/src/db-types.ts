@@ -188,6 +188,30 @@ export interface MessagingWebhookEventsTable {
   last_error: string | null
 }
 
+
+export interface InboundMessagesTable {
+  id: string
+  organization_id: string | null
+  webhook_event_id: string
+  provider: 'mock' | 'meta'
+  external_message_id: string
+  sender: string
+  recipient: string | null
+  content_type: 'text' | 'media'
+  text: string | null
+  content: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  status: 'received' | 'resolved' | 'processing' | 'processed' | 'needs_review' | 'ignored' | 'failed'
+  resolved_event_id: string | null
+  resolved_event_vendor_id: string | null
+  candidate_event_vendor_ids: JSONColumnType<string[], string[], string[]>
+  interpretation: JSONColumnType<Record<string, unknown> | null, Record<string, unknown> | null, Record<string, unknown> | null>
+  received_at: ColumnType<Date, Date | string, Date | string>
+  processed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  last_error: string | null
+}
+
 export interface OutboxEventsTable {
   id: string
   organization_id: string
@@ -218,5 +242,6 @@ export interface DatabaseSchema {
   automation_actions: AutomationActionsTable
   outbound_messages: OutboundMessagesTable
   messaging_webhook_events: MessagingWebhookEventsTable
+  inbound_messages: InboundMessagesTable
   outbox_events: OutboxEventsTable
 }

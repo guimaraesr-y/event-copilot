@@ -122,6 +122,11 @@ export class VendorEngine {
   async confirm(input: ConfirmVendorInput): Promise<EventVendor> {
     const current = await this.requireAssignment(input.organizationId, input.eventId, input.eventVendorId)
     if (current.confirmationStatus === 'cancelled') throw new VendorValidationError('Cancelled vendor assignment cannot be confirmed')
+    if (current.confirmationStatus === 'confirmed' &&
+      (input.arrivalAt === undefined || input.arrivalAt?.getTime() === current.arrivalAt?.getTime()) &&
+      (input.departureAt === undefined || input.departureAt?.getTime() === current.departureAt?.getTime()) &&
+      (input.teamSize === undefined || input.teamSize === current.teamSize) &&
+      input.notes === undefined) return current
     const now = this.now()
     const updated: EventVendor = {
       ...current, confirmationStatus: 'confirmed',
@@ -143,6 +148,7 @@ export class VendorEngine {
   async decline(input: DeclineVendorInput): Promise<EventVendor> {
     const current = await this.requireAssignment(input.organizationId, input.eventId, input.eventVendorId)
     if (current.confirmationStatus === 'cancelled') throw new VendorValidationError('Cancelled vendor assignment cannot be declined')
+    if (current.confirmationStatus === 'declined' && input.notes === undefined) return current
     const now = this.now()
     const updated: EventVendor = {
       ...current, confirmationStatus: 'declined', confirmedAt: null, declinedAt: now,

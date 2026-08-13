@@ -27,6 +27,14 @@ const mockEvents=mock.parse({rawBody:mockBody,headers:{},query:{},receivedAt})
 assert(mockEvents.length===1 && mockEvents[0]?.type==='message.status','mock parses canonical status')
 assert(mockEvents[0]?.provider==='mock','mock provider set')
 
+const mockInboundBody=JSON.stringify({
+  type:'message.received',externalMessageId:'mock-inbound-1',sender:'5521999999999',recipient:'5521888888888',
+  occurredAt:'2026-08-10T04:02:00.000Z',content:{type:'text',text:'Confirmado'},
+})
+const mockInbound=mock.parse({rawBody:mockInboundBody,headers:{},query:{},receivedAt})
+assert(mockInbound[0]?.type==='message.received','mock parses inbound message')
+if(mockInbound[0]?.type==='message.received') assert(mockInbound[0].content.type==='text' && mockInbound[0].content.text==='Confirmado','mock inbound text normalized')
+
 let rejected=false
 try {
   mock.verify({rawBody:mockBody,headers:{'x-ecc-timestamp':mockTimestamp,'x-ecc-signature':'sha256=00'},query:{},receivedAt})
@@ -99,4 +107,4 @@ try {
 }
 assert(rejected,'Meta rejects invalid signature')
 
-console.log('MessagingWebhookAdapters: 10/10 behavioral scenarios passed')
+console.log('MessagingWebhookAdapters: 12/12 behavioral scenarios passed')

@@ -9,3 +9,5 @@ export * from './repositories/kysely-vendor-store.ts'
 export * from './repositories/domain-event-gateway-repository.ts'
 
 export * from './repositories/kysely-message-store.ts'
+
+export * from './repositories/kysely-inbound-message-store.ts'

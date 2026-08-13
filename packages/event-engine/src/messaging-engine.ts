@@ -2,6 +2,7 @@ import type {
   AutomationActionRef,
   CanonicalMessagingWebhookEvent,
   DomainEvent,
+  InboundMessage,
   MessageStore,
   MessagingProvider,
   OutboundMessage,
@@ -157,9 +158,56 @@ export class MessagingEngine {
     const duplicate = !registered.created
 
     if (input.event.type === 'message.received') {
-      // Persisted and normalized now; Feature 06 will resolve conversation/vendor and consume it.
-      // Duplicate inbound deliveries do not need to enqueue the same canonical message again.
-      return { duplicate, handled: false, status: registered.receipt.status }
+      if (duplicate && registered.receipt.status === 'processed') {
+        return { duplicate: true, handled: true, status: 'processed' }
+      }
+
+      try {
+        const candidates = await this.store.findInboundCandidates(input.event.sender, input.event.occurredAt)
+        const unique = candidates.length === 1 ? candidates[0] : null
+        const now = this.now()
+        const inbound: InboundMessage = {
+          id: this.newId(),
+          organizationId: unique?.organizationId ?? null,
+          webhookEventId: registered.receipt.id,
+          provider: input.event.provider,
+          externalMessageId: input.event.externalMessageId,
+          sender: input.event.sender.replace(/\D/g, ''),
+          recipient: input.event.recipient,
+          content: input.event.content,
+          status: unique ? 'resolved' : candidates.length === 0 ? 'ignored' : 'needs_review',
+          resolvedEventId: unique?.eventId ?? null,
+          resolvedEventVendorId: unique?.eventVendorId ?? null,
+          candidateEventVendorIds: candidates.map((candidate) => candidate.eventVendorId),
+          interpretation: null,
+          receivedAt: input.event.occurredAt,
+          processedAt: candidates.length === 1 ? null : now,
+          createdAt: now,
+          updatedAt: now,
+          lastError: candidates.length === 0 ? 'No pending vendor confirmation matches sender' : candidates.length > 1 ? 'Multiple pending vendor confirmations match sender' : null,
+        }
+        const domainEvent = unique ? {
+          id: this.newId(),
+          organizationId: unique.organizationId,
+          eventType: 'message.received',
+          aggregateType: 'inbound_message',
+          aggregateId: inbound.id,
+          occurredAt: input.event.occurredAt,
+          payload: {
+            inboundMessageId: inbound.id, eventId: unique.eventId, eventVendorId: unique.eventVendorId,
+            sender: inbound.sender, provider: inbound.provider, contentType: inbound.content.type,
+            text: inbound.content.type === 'text' ? inbound.content.text : null,
+          },
+        } satisfies DomainEvent : null
+
+        await this.store.createInboundMessageWithOutbox(inbound, domainEvent)
+        await this.store.markWebhookEventProcessed(registered.receipt.id, now)
+        return { duplicate, handled: true, status: inbound.status }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        await this.store.markWebhookEventFailed(registered.receipt.id, message, this.now())
+        throw error
+      }
     }
 
     // message.status is safe to retry while the receipt is not terminal. This matters when

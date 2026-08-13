@@ -1,3 +1,4 @@
+import type { InboundMessage, InboundResolutionCandidate } from './inbound.ts'
 import type { DomainEvent } from './outbox.ts'
 
 export const MESSAGE_CHANNELS = ['whatsapp', 'email', 'sms'] as const
@@ -138,6 +139,9 @@ export interface MessageStore {
   markWebhookEventProcessed(id: string, at: Date): Promise<void>
   markWebhookEventIgnored(id: string, reason: string, at: Date): Promise<void>
   markWebhookEventFailed(id: string, error: string, at: Date): Promise<void>
+  findInboundCandidates(sender: string, receivedAt: Date): Promise<InboundResolutionCandidate[]>
+  findInboundByProviderMessageId(provider: MessageProviderName, externalMessageId: string): Promise<InboundMessage | null>
+  createInboundMessageWithOutbox(message: InboundMessage, domainEvent: DomainEvent | null): Promise<{ message: InboundMessage; created: boolean }>
 }
 
 export class MessagingValidationError extends Error {

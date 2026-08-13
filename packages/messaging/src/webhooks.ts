@@ -56,13 +56,23 @@ export class MockMessagingWebhookAdapter implements MessagingWebhookAdapter {
   parse(request: MessagingWebhookRequest): CanonicalMessagingWebhookEvent[] {
     const body = jsonObject(request.rawBody)
     const externalMessageId = stringField(body.externalMessageId, 'externalMessageId')
-    const status = providerStatus(body.status)
     const occurredAt = dateField(body.occurredAt, 'occurredAt')
+    if (body.type === 'message.received') {
+      const sender = stringField(body.sender, 'sender')
+      const recipient = typeof body.recipient === 'string' ? body.recipient : null
+      const content = isRecord(body.content) && body.content.type === 'text' && typeof body.content.text === 'string'
+        ? { type: 'text' as const, text: body.content.text }
+        : { type: 'media' as const, mediaType: 'unknown', mediaId: null, caption: null }
+      return [{
+        type: 'message.received', provider: 'mock', externalEventId: `mock:${externalMessageId}:received`,
+        externalMessageId, sender, recipient, occurredAt, content, raw: body,
+      }]
+    }
+    const status = providerStatus(body.status)
     return [{
       type: 'message.status', provider: 'mock',
       externalEventId: `mock:${externalMessageId}:${status}:${occurredAt.toISOString()}`,
-      externalMessageId, status, occurredAt,
-      raw: body,
+      externalMessageId, status, occurredAt, raw: body,
     }]
   }
 }

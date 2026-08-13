@@ -7,10 +7,11 @@ import {
   KyselyEventStore,
   KyselyVendorStore,
   KyselyMessageStore,
+  KyselyInboundMessageStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine, MessagingEngine } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
@@ -19,6 +20,7 @@ import { registerVendorRoutes } from './routes/vendors.ts'
 import { registerDomainEventRoutes } from './routes/domain-events.ts'
 import { registerMessagingRoutes } from './routes/messaging.ts'
 import { registerMessagingWebhookRoutes } from './routes/messaging-webhooks.ts'
+import { registerInboundMessageRoutes } from './routes/inbound-messages.ts'
 import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
@@ -29,6 +31,11 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
   const domainEventGatewayRepository = new DomainEventGatewayRepository(db)
   const messagingEngine = new MessagingEngine({ store: new KyselyMessageStore(db), provider: createMessagingProvider() })
+  const inboundEngine = new InboundEngine({
+    store: new KyselyInboundMessageStore(db),
+    vendorEngine,
+    interpreter: new RuleBasedSupplierResponseInterpreter(),
+  })
 
   app.onError((error, c) => {
     console.error('[api] unhandled error', error)
@@ -43,6 +50,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerDomainEventRoutes(app, domainEventGatewayRepository)
   registerMessagingRoutes(app, messagingEngine)
   registerMessagingWebhookRoutes(app, messagingEngine, createMessagingWebhookRegistry())
+  registerInboundMessageRoutes(app, inboundEngine)
 
   return app
 }

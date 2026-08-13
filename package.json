@@ -1,7 +1,7 @@
 {
   "name": "event-command-center",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.6.0",
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "apps/*",
@@ -15,7 +15,7 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "validate:foundation": "python3 scripts/validate_foundation.py",
-    "validate:feature": "python3 scripts/validate_feature_051.py"
+    "validate:feature": "python3 scripts/validate_feature_06.py"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0",

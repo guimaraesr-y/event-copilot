@@ -1,6 +1,8 @@
 import type { Kysely, Selectable, Transaction } from 'kysely'
 import type {
   AutomationActionRef,
+  InboundMessage,
+  InboundResolutionCandidate,
   ClaimMessageResult,
   DomainEvent,
   MessageProviderName,
@@ -11,7 +13,7 @@ import type {
   OutboundMessage,
   ProviderStatusInput,
 } from '@ecc/domain'
-import type { AutomationActionsTable, DatabaseSchema, MessagingWebhookEventsTable, OutboundMessagesTable } from '../db-types.ts'
+import type { AutomationActionsTable, DatabaseSchema, InboundMessagesTable, MessagingWebhookEventsTable, OutboundMessagesTable } from '../db-types.ts'
 
 const RANK: Record<string, number> = { pending: 0, sending: 1, sent: 2, delivered: 3, read: 4 }
 
@@ -42,6 +44,57 @@ export class KyselyMessageStore implements MessageStore {
     const row = await this.db.selectFrom('outbound_messages').selectAll()
       .where('provider', '=', provider).where('external_message_id', '=', externalMessageId).executeTakeFirst()
     return row ? this.mapMessage(row) : null
+  }
+
+  async findInboundCandidates(sender: string, receivedAt: Date): Promise<InboundResolutionCandidate[]> {
+    const normalized = sender.replace(/\D/g, '')
+    const since = new Date(receivedAt.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const rows = await this.db.selectFrom('outbound_messages as om')
+      .innerJoin('event_vendors as ev', (join) => join.onRef('ev.id', '=', 'om.aggregate_id').onRef('ev.organization_id', '=', 'om.organization_id'))
+      .select([
+        'om.organization_id as organization_id', 'ev.event_id as event_id', 'ev.id as event_vendor_id',
+        'ev.vendor_id as vendor_id', 'om.id as outbound_message_id', 'om.sent_at as sent_at',
+      ])
+      .where('om.aggregate_type', '=', 'event_vendor')
+      .where('om.message_type', '=', 'vendor_confirmation')
+      .where('om.recipient', '=', normalized)
+      .where('om.status', 'in', ['sent','delivered','read'])
+      .where('om.sent_at', '>=', since)
+      .where('ev.confirmation_status', '=', 'requested')
+      .orderBy('om.sent_at', 'desc')
+      .execute()
+
+    const seen = new Set<string>()
+    const result: InboundResolutionCandidate[] = []
+    for (const row of rows) {
+      if (!row.sent_at || seen.has(row.event_vendor_id)) continue
+      seen.add(row.event_vendor_id)
+      result.push({
+        organizationId: row.organization_id, eventId: row.event_id, eventVendorId: row.event_vendor_id,
+        vendorId: row.vendor_id, outboundMessageId: row.outbound_message_id, sentAt: row.sent_at,
+      })
+    }
+    return result
+  }
+
+  async findInboundByProviderMessageId(provider: MessageProviderName, externalMessageId: string): Promise<InboundMessage | null> {
+    const row = await this.db.selectFrom('inbound_messages').selectAll()
+      .where('provider', '=', provider).where('external_message_id', '=', externalMessageId).executeTakeFirst()
+    return row ? this.mapInbound(row) : null
+  }
+
+  async createInboundMessageWithOutbox(message: InboundMessage, domainEvent: DomainEvent | null): Promise<{ message: InboundMessage; created: boolean }> {
+    return this.db.transaction().execute(async (trx) => {
+      const inserted = await trx.insertInto('inbound_messages').values(this.inboundValues(message))
+        .onConflict((oc) => oc.columns(['provider','external_message_id']).doNothing()).returningAll().executeTakeFirst()
+      if (!inserted) {
+        const existing = await trx.selectFrom('inbound_messages').selectAll()
+          .where('provider', '=', message.provider).where('external_message_id', '=', message.externalMessageId).executeTakeFirstOrThrow()
+        return { message: this.mapInbound(existing), created: false }
+      }
+      if (domainEvent) await this.insertOutbox(trx, domainEvent)
+      return { message: this.mapInbound(inserted), created: true }
+    })
   }
 
   async registerWebhookEvent(input: RegisterWebhookEventInput): Promise<RegisterWebhookEventResult> {
@@ -189,6 +242,29 @@ export class KyselyMessageStore implements MessageStore {
       aggregateId: row.aggregate_id, status: row.status, externalMessageId: row.external_message_id, payload: row.payload,
       providerResponse: row.provider_response, createdAt: row.created_at, updatedAt: row.updated_at, sentAt: row.sent_at,
       deliveredAt: row.delivered_at, readAt: row.read_at, failedAt: row.failed_at, lastError: row.last_error,
+    }
+  }
+
+  private inboundValues(message: InboundMessage) {
+    return {
+      id: message.id, organization_id: message.organizationId, webhook_event_id: message.webhookEventId,
+      provider: message.provider, external_message_id: message.externalMessageId, sender: message.sender, recipient: message.recipient,
+      content_type: message.content.type, text: message.content.type === 'text' ? message.content.text : null,
+      content: message.content as any, status: message.status, resolved_event_id: message.resolvedEventId,
+      resolved_event_vendor_id: message.resolvedEventVendorId, candidate_event_vendor_ids: message.candidateEventVendorIds,
+      interpretation: message.interpretation as any, received_at: message.receivedAt, processed_at: message.processedAt,
+      created_at: message.createdAt, updated_at: message.updatedAt, last_error: message.lastError,
+    }
+  }
+
+  private mapInbound(row: Selectable<InboundMessagesTable>): InboundMessage {
+    return {
+      id: row.id, organizationId: row.organization_id, webhookEventId: row.webhook_event_id, provider: row.provider,
+      externalMessageId: row.external_message_id, sender: row.sender, recipient: row.recipient, content: row.content as any,
+      status: row.status, resolvedEventId: row.resolved_event_id, resolvedEventVendorId: row.resolved_event_vendor_id,
+      candidateEventVendorIds: row.candidate_event_vendor_ids, interpretation: row.interpretation as any,
+      receivedAt: row.received_at, processedAt: row.processed_at, createdAt: row.created_at, updatedAt: row.updated_at,
+      lastError: row.last_error,
     }
   }
 

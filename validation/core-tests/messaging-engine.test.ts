@@ -1,6 +1,6 @@
 import { MessagingEngine } from '../../packages/event-engine/src/messaging-engine.ts'
 import type {
-  AutomationActionRef, CanonicalMessagingWebhookEvent, ClaimMessageResult, DomainEvent, MessageProviderName, MessageStore,
+  AutomationActionRef, CanonicalMessagingWebhookEvent, ClaimMessageResult, DomainEvent, InboundMessage, InboundResolutionCandidate, MessageProviderName, MessageStore,
   MessagingWebhookReceipt, OutboundMessage, ProviderStatusInput, RegisterWebhookEventInput, SendResult,
 } from '../../packages/domain/src/index.ts'
 
@@ -15,6 +15,7 @@ class Store implements MessageStore {
   message: OutboundMessage | null = null
   outbox: DomainEvent[] = []
   receipts = new Map<string, MessagingWebhookReceipt>()
+  inbounds = new Map<string, InboundMessage>()
 
   async findAutomationAction(id:string){ return this.action?.id===id ? this.action : null }
   async getOrganizationTimezone(){ return 'America/Sao_Paulo' }
@@ -36,6 +37,21 @@ class Store implements MessageStore {
     return {message:this.message,changed:true}
   }
 
+  async findInboundCandidates(sender:string):Promise<InboundResolutionCandidate[]> {
+    const normalized=sender.replace(/\D/g,'')
+    const first={organizationId:action.organizationId,eventId:String(action.payload.eventId),eventVendorId:action.aggregateId,vendorId:'10000000-0000-4000-8000-000000000099',outboundMessageId:this.message?.id??'outbound-1',sentAt:new Date('2026-08-10T04:00:00Z')}
+    if(normalized==='5521999999999') return [first]
+    if(normalized==='5521777777777') return [first,{...first,eventId:'event-2',eventVendorId:'event-vendor-2',outboundMessageId:'outbound-2'}]
+    return []
+  }
+  async findInboundByProviderMessageId(provider:MessageProviderName,id:string){
+    return [...this.inbounds.values()].find((m)=>m.provider===provider&&m.externalMessageId===id)??null
+  }
+  async createInboundMessageWithOutbox(message:InboundMessage,event:DomainEvent|null){
+    const existing=await this.findInboundByProviderMessageId(message.provider,message.externalMessageId)
+    if(existing)return {message:existing,created:false}
+    this.inbounds.set(message.id,message); if(event)this.outbox.push(event); return {message,created:true}
+  }
   async registerWebhookEvent(input:RegisterWebhookEventInput){
     const key=`${input.event.provider}|${input.event.externalEventId}`
     const existing=this.receipts.get(key)
@@ -122,6 +138,22 @@ const inboundEvent:CanonicalMessagingWebhookEvent={
   occurredAt:new Date('2026-08-10T04:05:00Z'), content:{type:'text',text:'Confirmado'}, raw:{type:'text'},
 }
 const inbound=await engine.handleWebhookEvent({event:inboundEvent,payloadHash:'hash-inbound',rawPayload:{object:'whatsapp_business_account'}})
-assert(!inbound.duplicate && !inbound.handled && inbound.status==='received','inbound is normalized and persisted for feature 06')
+assert(!inbound.duplicate && inbound.handled && inbound.status==='resolved','inbound is correlated and emits message.received')
+assert([...store.inbounds.values()].length===1,'inbound message persisted')
+assert(store.outbox.some((e)=>e.eventType==='message.received'),'message.received emitted for unique context')
 
-console.log('MessagingEngine: 10/10 behavioral scenarios passed')
+const noContextEvent:CanonicalMessagingWebhookEvent={
+  ...inboundEvent,externalEventId:'meta:none:received',externalMessageId:'none',sender:'5521000000000',
+}
+const noContext=await engine.handleWebhookEvent({event:noContextEvent,payloadHash:'hash-none',rawPayload:{object:'whatsapp_business_account'}})
+assert(noContext.status==='ignored','inbound without pending confirmation is ignored safely')
+assert([...store.inbounds.values()].some((m)=>m.externalMessageId==='none'&&m.status==='ignored'),'ignored inbound remains auditable')
+
+const ambiguousEvent:CanonicalMessagingWebhookEvent={
+  ...inboundEvent,externalEventId:'meta:ambiguous:received',externalMessageId:'ambiguous',sender:'5521777777777',
+}
+const ambiguous=await engine.handleWebhookEvent({event:ambiguousEvent,payloadHash:'hash-ambiguous',rawPayload:{object:'whatsapp_business_account'}})
+assert(ambiguous.status==='needs_review','ambiguous inbound never chooses an event silently')
+assert([...store.inbounds.values()].some((m)=>m.externalMessageId==='ambiguous'&&m.candidateEventVendorIds.length===2),'ambiguous candidates are persisted for review')
+
+console.log('MessagingEngine: 16/16 behavioral scenarios passed')
