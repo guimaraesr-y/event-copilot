@@ -153,8 +153,8 @@ MESSAGE_COUNT=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER
 [ "$MESSAGE_COUNT" = '1' ] || { echo "expected 1 outbound message, got $MESSAGE_COUNT"; exit 1; }
 echo OK
 
-DELIVERED_AT='2026-08-10T04:01:00.000Z'
-READ_AT='2026-08-10T04:02:00.000Z'
+DELIVERED_AT=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
+READ_AT=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
 
 printf '13/22 simulate delivered through generic messaging webhook... '
 post_mock_provider_status "$EXTERNAL_ID" delivered "$DELIVERED_AT"
@@ -182,7 +182,9 @@ echo OK
 
 printf '18/22 simulate supplier inbound confirmation... '
 INBOUND_EXTERNAL_ID="mock-inbound-$ASSIGNMENT_ID"
-INBOUND_AT='2026-08-10T04:05:00.000Z'
+# Keep the simulated reply strictly after the outbound send timestamp.
+sleep 1
+INBOUND_AT=$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')
 post_mock_inbound_message "$INBOUND_EXTERNAL_ID" '5521999999999' 'Sim, confirmado. Chegaremos às 14:30 com 3 pessoas.' "$INBOUND_AT"
 echo OK
 

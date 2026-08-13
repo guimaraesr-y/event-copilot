@@ -60,6 +60,7 @@ export class KyselyMessageStore implements MessageStore {
       .where('om.recipient', '=', normalized)
       .where('om.status', 'in', ['sent','delivered','read'])
       .where('om.sent_at', '>=', since)
+      .where('om.sent_at', '<=', receivedAt)
       .where('ev.confirmation_status', '=', 'requested')
       .orderBy('om.sent_at', 'desc')
       .execute()
@@ -251,7 +252,10 @@ export class KyselyMessageStore implements MessageStore {
       provider: message.provider, external_message_id: message.externalMessageId, sender: message.sender, recipient: message.recipient,
       content_type: message.content.type, text: message.content.type === 'text' ? message.content.text : null,
       content: message.content as any, status: message.status, resolved_event_id: message.resolvedEventId,
-      resolved_event_vendor_id: message.resolvedEventVendorId, candidate_event_vendor_ids: message.candidateEventVendorIds,
+      resolved_event_vendor_id: message.resolvedEventVendorId,
+      // node-postgres serializes JS arrays as PostgreSQL arrays (`{...}`), not JSON.
+      // Serialize explicitly because this column is jsonb and must receive JSON (`[...]`).
+      candidate_event_vendor_ids: JSON.stringify(message.candidateEventVendorIds) as any,
       interpretation: message.interpretation as any, received_at: message.receivedAt, processed_at: message.processedAt,
       created_at: message.createdAt, updated_at: message.updatedAt, last_error: message.lastError,
     }
