@@ -84,7 +84,7 @@ export class KyselyMessageStore implements MessageStore {
     return row ? this.mapInbound(row) : null
   }
 
-  async createInboundMessageWithOutbox(message: InboundMessage, domainEvent: DomainEvent | null): Promise<{ message: InboundMessage; created: boolean }> {
+  async createInboundMessageWithOutbox(message: InboundMessage, domainEvents: DomainEvent[]): Promise<{ message: InboundMessage; created: boolean }> {
     return this.db.transaction().execute(async (trx) => {
       const inserted = await trx.insertInto('inbound_messages').values(this.inboundValues(message))
         .onConflict((oc) => oc.columns(['provider','external_message_id']).doNothing()).returningAll().executeTakeFirst()
@@ -93,7 +93,7 @@ export class KyselyMessageStore implements MessageStore {
           .where('provider', '=', message.provider).where('external_message_id', '=', message.externalMessageId).executeTakeFirstOrThrow()
         return { message: this.mapInbound(existing), created: false }
       }
-      if (domainEvent) await this.insertOutbox(trx, domainEvent)
+      for (const domainEvent of domainEvents) await this.insertOutbox(trx, domainEvent)
       return { message: this.mapInbound(inserted), created: true }
     })
   }

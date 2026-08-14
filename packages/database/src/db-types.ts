@@ -212,6 +212,43 @@ export interface InboundMessagesTable {
   last_error: string | null
 }
 
+export interface ActivityEntriesTable {
+  id: string
+  organization_id: string
+  event_id: string | null
+  source_event_id: string
+  actor_type: 'user' | 'system' | 'vendor' | 'client' | 'automation'
+  actor_id: string | null
+  category: 'event' | 'task' | 'vendor' | 'message' | 'document' | 'payment' | 'change' | 'risk' | 'system'
+  action: string
+  entity_type: string
+  entity_id: string | null
+  title: string
+  description: string | null
+  metadata: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  occurred_at: ColumnType<Date, Date | string, Date | string>
+  created_at: ColumnType<Date, Date | string, never>
+}
+
+export interface InboxItemsTable {
+  id: string
+  organization_id: string
+  event_id: string | null
+  source_event_id: string
+  type: string
+  severity: 'info' | 'warning' | 'critical'
+  source_type: string
+  source_id: string | null
+  title: string
+  description: string | null
+  status: 'open' | 'in_progress' | 'resolved' | 'dismissed'
+  assigned_to: string | null
+  metadata: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+}
+
 export interface OutboxEventsTable {
   id: string
   organization_id: string
@@ -243,5 +280,7 @@ export interface DatabaseSchema {
   outbound_messages: OutboundMessagesTable
   messaging_webhook_events: MessagingWebhookEventsTable
   inbound_messages: InboundMessagesTable
+  activity_entries: ActivityEntriesTable
+  inbox_items: InboxItemsTable
   outbox_events: OutboxEventsTable
 }

@@ -141,7 +141,7 @@ export interface MessageStore {
   markWebhookEventFailed(id: string, error: string, at: Date): Promise<void>
   findInboundCandidates(sender: string, receivedAt: Date): Promise<InboundResolutionCandidate[]>
   findInboundByProviderMessageId(provider: MessageProviderName, externalMessageId: string): Promise<InboundMessage | null>
-  createInboundMessageWithOutbox(message: InboundMessage, domainEvent: DomainEvent | null): Promise<{ message: InboundMessage; created: boolean }>
+  createInboundMessageWithOutbox(message: InboundMessage, domainEvents: DomainEvent[]): Promise<{ message: InboundMessage; created: boolean }>
 }
 
 export class MessagingValidationError extends Error {

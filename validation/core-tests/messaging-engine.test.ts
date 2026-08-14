@@ -42,15 +42,16 @@ class Store implements MessageStore {
     const first={organizationId:action.organizationId,eventId:String(action.payload.eventId),eventVendorId:action.aggregateId,vendorId:'10000000-0000-4000-8000-000000000099',outboundMessageId:this.message?.id??'outbound-1',sentAt:new Date('2026-08-10T04:00:00Z')}
     if(normalized==='5521999999999') return [first]
     if(normalized==='5521777777777') return [first,{...first,eventId:'event-2',eventVendorId:'event-vendor-2',outboundMessageId:'outbound-2'}]
+    if(normalized==='5521666666666') return [first,{...first,organizationId:'30000000-0000-4000-8000-000000000001',eventId:'30000000-0000-4000-8000-000000000002',eventVendorId:'30000000-0000-4000-8000-000000000003',outboundMessageId:'outbound-cross-tenant'}]
     return []
   }
   async findInboundByProviderMessageId(provider:MessageProviderName,id:string){
     return [...this.inbounds.values()].find((m)=>m.provider===provider&&m.externalMessageId===id)??null
   }
-  async createInboundMessageWithOutbox(message:InboundMessage,event:DomainEvent|null){
+  async createInboundMessageWithOutbox(message:InboundMessage,events:DomainEvent[]){
     const existing=await this.findInboundByProviderMessageId(message.provider,message.externalMessageId)
     if(existing)return {message:existing,created:false}
-    this.inbounds.set(message.id,message); if(event)this.outbox.push(event); return {message,created:true}
+    this.inbounds.set(message.id,message); this.outbox.push(...events); return {message,created:true}
   }
   async registerWebhookEvent(input:RegisterWebhookEventInput){
     const key=`${input.event.provider}|${input.event.externalEventId}`
@@ -155,5 +156,15 @@ const ambiguousEvent:CanonicalMessagingWebhookEvent={
 const ambiguous=await engine.handleWebhookEvent({event:ambiguousEvent,payloadHash:'hash-ambiguous',rawPayload:{object:'whatsapp_business_account'}})
 assert(ambiguous.status==='needs_review','ambiguous inbound never chooses an event silently')
 assert([...store.inbounds.values()].some((m)=>m.externalMessageId==='ambiguous'&&m.candidateEventVendorIds.length===2),'ambiguous candidates are persisted for review')
+assert(store.outbox.some((e)=>e.eventType==='message.review_required'&&e.aggregateType==='inbound_message'),'ambiguous inbound emits review-required operational event')
 
-console.log('MessagingEngine: 16/16 behavioral scenarios passed')
+const crossTenantEvent:CanonicalMessagingWebhookEvent={
+  ...inboundEvent,externalEventId:'meta:cross-tenant:received',externalMessageId:'cross-tenant',sender:'5521666666666',
+}
+const beforeCrossTenant=store.outbox.length
+const crossTenant=await engine.handleWebhookEvent({event:crossTenantEvent,payloadHash:'hash-cross',rawPayload:{object:'whatsapp_business_account'}})
+assert(crossTenant.status==='needs_review','cross-tenant ambiguity requires review')
+const reviewEvents=store.outbox.slice(beforeCrossTenant).filter((e)=>e.eventType==='message.review_required')
+assert(reviewEvents.length===2 && reviewEvents.every((e)=>Array.isArray(e.payload.candidateEventVendorIds)&&e.payload.candidateEventVendorIds.length===1),'cross-tenant review events isolate candidate ids per organization')
+
+console.log('MessagingEngine: 18/18 behavioral scenarios passed')

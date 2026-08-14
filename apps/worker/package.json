@@ -8,6 +8,7 @@
   "dependencies": {
     "@ecc/database": "workspace:*",
     "@ecc/domain": "workspace:*",
-    "@ecc/contracts": "workspace:*"
+    "@ecc/contracts": "workspace:*",
+    "@ecc/event-engine": "workspace:*"
   }
 }

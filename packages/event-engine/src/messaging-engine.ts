@@ -126,7 +126,7 @@ export class MessagingEngine {
         claim.message.id,
         message,
         now,
-        this.domainEvent(claim.message, 'message.failed', { messageId: claim.message.id, provider: claim.message.provider, error: message }, now),
+        this.domainEvent(claim.message, 'message.failed', { messageId: claim.message.id, provider: claim.message.provider, error: message, eventId: claim.message.payload.eventId ?? null, eventVendorId: claim.message.payload.eventVendorId ?? null }, now),
       )
       if (error instanceof MessagingProviderError) throw error
       throw new MessagingProviderError(message)
@@ -186,21 +186,39 @@ export class MessagingEngine {
           updatedAt: now,
           lastError: candidates.length === 0 ? 'No pending vendor confirmation matches sender' : candidates.length > 1 ? 'Multiple pending vendor confirmations match sender' : null,
         }
-        const domainEvent = unique ? {
-          id: this.newId(),
-          organizationId: unique.organizationId,
-          eventType: 'message.received',
-          aggregateType: 'inbound_message',
-          aggregateId: inbound.id,
-          occurredAt: input.event.occurredAt,
-          payload: {
-            inboundMessageId: inbound.id, eventId: unique.eventId, eventVendorId: unique.eventVendorId,
-            sender: inbound.sender, provider: inbound.provider, contentType: inbound.content.type,
-            text: inbound.content.type === 'text' ? inbound.content.text : null,
-          },
-        } satisfies DomainEvent : null
+        const domainEvents: DomainEvent[] = []
+        if (unique) {
+          domainEvents.push({
+            id: this.newId(), organizationId: unique.organizationId, eventType: 'message.received',
+            aggregateType: 'inbound_message', aggregateId: inbound.id, occurredAt: input.event.occurredAt,
+            payload: {
+              inboundMessageId: inbound.id, eventId: unique.eventId, eventVendorId: unique.eventVendorId,
+              sender: inbound.sender, provider: inbound.provider, contentType: inbound.content.type,
+              text: inbound.content.type === 'text' ? inbound.content.text : null,
+            },
+          })
+        } else if (candidates.length > 1) {
+          const byOrganization = new Map<string, typeof candidates>()
+          for (const candidate of candidates) {
+            const current = byOrganization.get(candidate.organizationId) ?? []
+            current.push(candidate)
+            byOrganization.set(candidate.organizationId, current)
+          }
+          for (const [organizationId, organizationCandidates] of byOrganization) {
+            const eventIds = [...new Set(organizationCandidates.map((candidate) => candidate.eventId))]
+            domainEvents.push({
+              id: this.newId(), organizationId, eventType: 'message.review_required',
+              aggregateType: 'inbound_message', aggregateId: inbound.id, occurredAt: input.event.occurredAt,
+              payload: {
+                inboundMessageId: inbound.id, eventId: eventIds.length === 1 ? eventIds[0] : null,
+                sender: inbound.sender, provider: inbound.provider, reason: inbound.lastError,
+                candidateEventVendorIds: organizationCandidates.map((candidate) => candidate.eventVendorId),
+              },
+            })
+          }
+        }
 
-        await this.store.createInboundMessageWithOutbox(inbound, domainEvent)
+        await this.store.createInboundMessageWithOutbox(inbound, domainEvents)
         await this.store.markWebhookEventProcessed(registered.receipt.id, now)
         return { duplicate, handled: true, status: inbound.status }
       } catch (error) {

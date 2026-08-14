@@ -1,5 +1,6 @@
-import type { Kysely, Selectable } from 'kysely'
+import type { Kysely, Selectable, Transaction } from 'kysely'
 import type {
+  DomainEvent,
   InboundMessage,
   InboundMessageStore,
   InboundProcessingContext,
@@ -42,8 +43,14 @@ export class KyselyInboundMessageStore implements InboundMessageStore {
     return this.patch(id, { status: 'processed', interpretation: interpretation as any, processed_at: at, updated_at: at, last_error: null })
   }
 
-  markNeedsReview(id: string, interpretation: SupplierResponseInterpretation | null, reason: string, at: Date): Promise<InboundMessage> {
-    return this.patch(id, { status: 'needs_review', interpretation: interpretation as any, processed_at: at, updated_at: at, last_error: reason })
+  async markNeedsReview(id: string, interpretation: SupplierResponseInterpretation | null, reason: string, at: Date, domainEvent?: DomainEvent): Promise<InboundMessage> {
+    if (!domainEvent) return this.patch(id, { status: 'needs_review', interpretation: interpretation as any, processed_at: at, updated_at: at, last_error: reason })
+    return this.db.transaction().execute(async (trx) => {
+      const row = await trx.updateTable('inbound_messages').set({ status: 'needs_review', interpretation: interpretation as any, processed_at: at, updated_at: at, last_error: reason })
+        .where('id', '=', id).returningAll().executeTakeFirstOrThrow()
+      await this.insertOutbox(trx, domainEvent)
+      return this.map(row)
+    })
   }
 
   markFailed(id: string, reason: string, at: Date): Promise<InboundMessage> {
@@ -53,6 +60,14 @@ export class KyselyInboundMessageStore implements InboundMessageStore {
   private async patch(id: string, values: Record<string, unknown>): Promise<InboundMessage> {
     const row = await this.db.updateTable('inbound_messages').set(values as any).where('id', '=', id).returningAll().executeTakeFirstOrThrow()
     return this.map(row)
+  }
+
+  private async insertOutbox(trx: Transaction<DatabaseSchema>, event: DomainEvent): Promise<void> {
+    await trx.insertInto('outbox_events').values({
+      id: event.id, organization_id: event.organizationId, event_type: event.eventType, aggregate_type: event.aggregateType,
+      aggregate_id: event.aggregateId, payload: event.payload, occurred_at: event.occurredAt, available_at: event.occurredAt,
+      claimed_at: null, claimed_by: null, dispatched_at: null, last_error: null,
+    }).execute()
   }
 
   private map(row: Selectable<InboundMessagesTable>): InboundMessage {

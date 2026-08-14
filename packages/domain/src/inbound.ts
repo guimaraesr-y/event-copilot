@@ -1,4 +1,5 @@
 import type { MessageProviderName, CanonicalMessageContent } from './message.ts'
+import type { DomainEvent } from './outbox.ts'
 
 export const INBOUND_MESSAGE_STATUSES = ['received','resolved','processing','processed','needs_review','ignored','failed'] as const
 export type InboundMessageStatus = (typeof INBOUND_MESSAGE_STATUSES)[number]
@@ -57,7 +58,7 @@ export interface InboundMessageStore {
   getProcessingContext(message: InboundMessage): Promise<InboundProcessingContext | null>
   markProcessing(id: string, at: Date): Promise<InboundMessage>
   markProcessed(id: string, interpretation: SupplierResponseInterpretation, at: Date): Promise<InboundMessage>
-  markNeedsReview(id: string, interpretation: SupplierResponseInterpretation | null, reason: string, at: Date): Promise<InboundMessage>
+  markNeedsReview(id: string, interpretation: SupplierResponseInterpretation | null, reason: string, at: Date, domainEvent?: DomainEvent): Promise<InboundMessage>
   markFailed(id: string, reason: string, at: Date): Promise<InboundMessage>
 }
 

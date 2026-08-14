@@ -1,11 +1,14 @@
 import { createHmac } from 'node:crypto'
 import { hostname } from 'node:os'
-import { createDatabase, OutboxRepository } from '@ecc/database'
+import { createDatabase, OperationalRepository, OutboxRepository } from '@ecc/database'
 import { canonicalizeDomainEvent, type DomainEventEnvelope } from '@ecc/contracts'
 import type { OutboxMessage } from '@ecc/domain'
+import { OperationalProjector } from '@ecc/event-engine'
 
 const db = createDatabase()
 const outbox = new OutboxRepository(db)
+const operations = new OperationalRepository(db)
+const operationalProjector = new OperationalProjector()
 const workerId = `${hostname()}-${process.pid}`
 const pollInterval = parsePositiveInt(process.env.OUTBOX_POLL_INTERVAL_MS, 2000)
 const batchSize = parsePositiveInt(process.env.OUTBOX_BATCH_SIZE, 20)
@@ -74,6 +77,7 @@ async function tick(): Promise<void> {
   const messages = await outbox.claimBatch(workerId, batchSize)
   for (const message of messages) {
     try {
+      await operations.applyProjection(message, operationalProjector.project(message))
       await dispatch(message)
       await outbox.markDispatched(message.id, workerId)
     } catch (error) {

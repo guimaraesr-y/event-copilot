@@ -8,6 +8,7 @@ import { migration005OutboundMessaging } from './migrations/005_outbound_messagi
 import { migration006MessagingWebhooks } from './migrations/006_messaging_webhooks.ts'
 import { migration007RestrictMessagingProviders } from './migrations/007_restrict_messaging_providers.ts'
 import { migration008SupplierInbound } from './migrations/008_supplier_inbound.ts'
+import { migration009OperationalInboxActivity } from './migrations/009_operational_inbox_activity.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -23,6 +24,7 @@ const migrator = new Migrator({
         '006_messaging_webhooks': migration006MessagingWebhooks,
         '007_restrict_messaging_providers': migration007RestrictMessagingProviders,
         '008_supplier_inbound': migration008SupplierInbound,
+        '009_operational_inbox_activity': migration009OperationalInboxActivity,
       }
     },
   },

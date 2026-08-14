@@ -1,11 +1,14 @@
-Mini-feature 06 validation
+Mini-feature 07 validation
+- Foundation/Compose structural validation: PASS
 - Full TypeScript structural compile: PASS
-- Strict domain/event/vendor/messaging/inbound compile: PASS
+- Strict domain/event/vendor/messaging/inbound/projector compile: PASS
 - EventEngine behavioral scenarios: 8 PASS
 - VendorEngine behavioral scenarios: 7 PASS
-- MessagingEngine behavioral scenarios: 16 PASS
+- MessagingEngine behavioral scenarios: 18 PASS
 - InboundEngine behavioral scenarios: 7 PASS
+- OperationalProjector behavioral scenarios: 5 PASS
 - MessagingWebhookAdapter behavioral scenarios: 12 PASS
-- n8n workflow structure: PASS
-- shell syntax: PASS
-- Docker/n8n/Postgres runtime smoke: NOT RUN in this environment (Docker unavailable). Run ./scripts/smoke.sh locally.
+- Total behavioral scenarios: 57 PASS
+- n8n workflow structure/registration script: preserved from validated Feature 06 runtime fix
+- shell syntax (`smoke.sh`, `n8n-sync.sh`, `smoke-env.sh`): PASS
+- Docker/n8n/Postgres runtime smoke: NOT RUN in this environment (Docker unavailable). Run `./scripts/smoke-env.sh` locally.

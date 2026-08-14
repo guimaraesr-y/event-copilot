@@ -26,7 +26,8 @@ export class InboundEngine {
       return { message: updated, duplicate: false, action: 'needs_review' }
     }
     if (message.content.type !== 'text') {
-      const updated = await this.deps.store.markNeedsReview(message.id, null, 'Only text supplier responses are supported in Mini-feature 06', now)
+      const reason = 'Only text supplier responses are supported in Mini-feature 06'
+      const updated = await this.deps.store.markNeedsReview(message.id, null, reason, now, this.reviewEvent(message, context, reason, now))
       return { message: updated, duplicate: false, action: 'needs_review' }
     }
 
@@ -34,7 +35,8 @@ export class InboundEngine {
     const interpretation = this.deps.interpreter.interpret(message.content.text)
 
     if (interpretation.confidence < 0.9 || interpretation.intent === 'unknown' || interpretation.intent === 'undecided') {
-      const updated = await this.deps.store.markNeedsReview(message.id, interpretation, `Supplier response requires review: ${interpretation.reason ?? interpretation.intent}`, now)
+      const reason = `Supplier response requires review: ${interpretation.reason ?? interpretation.intent}`
+      const updated = await this.deps.store.markNeedsReview(message.id, interpretation, reason, now, this.reviewEvent(message, context, reason, now))
       return { message: updated, duplicate: false, action: 'needs_review' }
     }
 
@@ -64,6 +66,14 @@ export class InboundEngine {
       const reason = error instanceof Error ? error.message : String(error)
       await this.deps.store.markFailed(message.id, reason, (this.deps.now ?? (() => new Date()))())
       throw error
+    }
+  }
+
+  private reviewEvent(message: InboundMessage, context: { organizationId: string; eventId: string; eventVendorId: string }, reason: string, occurredAt: Date) {
+    return {
+      id: crypto.randomUUID(), organizationId: context.organizationId, eventType: 'message.review_required',
+      aggregateType: 'inbound_message', aggregateId: message.id, occurredAt,
+      payload: { inboundMessageId: message.id, eventId: context.eventId, eventVendorId: context.eventVendorId, sender: message.sender, reason },
     }
   }
 }
