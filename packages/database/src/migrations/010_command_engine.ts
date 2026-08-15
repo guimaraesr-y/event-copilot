@@ -64,6 +64,10 @@ export const migration010CommandEngine = {
     await db.schema
       .alterTable('event_tasks')
       .addColumn('source_command_request_id', 'uuid', (col) => col.references('command_requests.id').onDelete('set null'))
+      .execute()
+
+    await db.schema
+      .alterTable('event_tasks')
       .addUniqueConstraint('event_tasks_command_request_unique', ['source_command_request_id'])
       .execute()
   },
