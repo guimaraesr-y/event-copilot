@@ -19,6 +19,20 @@ const input={text:'Crie uma tarefa no casamento da Ana para confirmar o buffet a
 }
 {
   const interpreter=new RuleBasedCommandInterpreter()
+  const result=await interpreter.interpret({...input,text:'Crie uma tarefa no casamento da Ana para confirmar o buffet amanha as 10h.'})
+  assert(result.intent==='CREATE_TASK','accentless CLI form classifies create task')
+  assert(result.taskTitle==='confirmar o buffet','accentless CLI form strips temporal suffix from title')
+  assert(result.dueAt==='2026-08-16T13:00:00.000Z','accentless CLI form resolves tomorrow at 10:00')
+}
+{
+  const interpreter=new RuleBasedCommandInterpreter()
+  const result=await interpreter.interpret({...input,text:'Crie uma tarefa no casamento da Ana para confirmar o buffet amanh� �s 10h.'})
+  assert(result.intent==='CREATE_TASK','degraded CLI form still classifies create task')
+  assert(result.taskTitle==='confirmar o buffet','degraded CLI form strips temporal suffix from title')
+  assert(result.dueAt==='2026-08-16T13:00:00.000Z','degraded CLI form recovers tomorrow at 10:00')
+}
+{
+  const interpreter=new RuleBasedCommandInterpreter()
   const result=await interpreter.interpret({...input,text:'Mude o horário do casamento da Ana para 17h'})
   assert(result.intent==='SENSITIVE_CHANGE' && result.sensitiveField==='event_time','sensitive mutation is gated')
 }
@@ -57,4 +71,4 @@ const input={text:'Crie uma tarefa no casamento da Ana para confirmar o buffet a
   assert(failed,'AI interpreter rejects invalid provider structured output')
 }
 
-console.log('CommandInterpreter: 5/5 behavioral scenarios passed')
+console.log('CommandInterpreter: 7/7 behavioral scenarios passed')

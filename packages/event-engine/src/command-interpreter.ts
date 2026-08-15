@@ -201,8 +201,10 @@ function extractTaskTitle(text: string): string | null {
 }
 function cleanTaskTitle(value: string): string | null {
   const stripped = value
-    .replace(/\s+(?:depois de amanh[ãa]|amanh[ãa]|hoje)(?:\s+(?:[àa]s?\s+)?\d{1,2}(?::\d{2}|h\d{0,2})?)?\s*$/i, '')
-    .replace(/\s+(?:[àa]s?\s+)\d{1,2}(?::\d{2}|h\d{0,2})?\s*$/i, '')
+    // Accept normal UTF-8, accentless text, and the Unicode replacement character
+    // sometimes introduced by Windows/Git Bash locale conversion at the CLI boundary.
+    .replace(/\s+(?:depois de amanh(?:[ãa]|\uFFFD)?|amanh(?:[ãa]|\uFFFD)?|hoje)(?:\s+(?:(?:[àa]|\uFFFD)s?\s+)?\d{1,2}(?::\d{2}|h\d{0,2})?)?\s*$/i, '')
+    .replace(/\s+(?:(?:[àa]|\uFFFD)s?\s+)\d{1,2}(?::\d{2}|h\d{0,2})?\s*$/i, '')
     .trim()
   return stripped || null
 }
@@ -222,12 +224,16 @@ function extractNote(text: string): string | null {
 function extractDueAt(text: string, now: Date, timezone: string): string | null {
   const normalized = normalize(text)
   let offset: number | null = null
-  if (/\bdepois de amanha\b/.test(normalized)) offset = 2
-  else if (/\bamanha\b/.test(normalized)) offset = 1
+  // `amanh` intentionally covers a degraded `amanh�` received from a CLI with
+  // a broken locale. The word boundary prevents matching words such as amanhecer.
+  if (/\bdepois de amanh(?:a)?\b/.test(normalized)) offset = 2
+  else if (/\bamanh(?:a)?\b/.test(normalized)) offset = 1
   else if (/\bhoje\b/.test(normalized)) offset = 0
   if (offset === null) return null
 
-  const timeMatch = text.match(/(?:[àa]s?\s+)?\b([01]?\d|2[0-3])(?::([0-5]\d)|h([0-5]\d)?)\b/i)
+  // Read the time from normalized text as well. This makes `às 10h`, `as 10h`
+  // and even a degraded `�s 10h` converge to the same `10h` token.
+  const timeMatch = normalized.match(/\b([01]?\d|2[0-3])(?::([0-5]\d)|h([0-5]\d)?)\b/i)
   const hour = timeMatch ? Number(timeMatch[1]) : 9
   const minute = timeMatch ? Number(timeMatch[2] ?? timeMatch[3] ?? 0) : 0
   const due = scheduleRelativeToReference(now, offset, `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`, timezone)

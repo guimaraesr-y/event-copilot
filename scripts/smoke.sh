@@ -287,7 +287,7 @@ printf '%s' "$CTX_COMMAND" | grep -q "$EVENT_ID" || { echo 'command did not reso
 echo OK
 
 printf '29/38 create task from conversational context... '
-TASK_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Crie uma tarefa para confirmar o buffet amanhã às 10h\",\"idempotencyKey\":\"smoke-command-task-1\"}")
+TASK_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Crie uma tarefa para confirmar o buffet amanha as 10h\",\"idempotencyKey\":\"smoke-command-task-1\"}")
 printf '%s' "$TASK_COMMAND" | grep -q '"intent":"CREATE_TASK"' || { echo "create task command failed: $TASK_COMMAND"; exit 1; }
 printf '%s' "$TASK_COMMAND" | grep -q '"status":"processed"' || { echo "task command not processed: $TASK_COMMAND"; exit 1; }
 COMMAND_REQUEST_ID=$(printf '%s' "$TASK_COMMAND" | sed -n 's/.*"request":{"id":"\([^"]*\)".*/\1/p')
@@ -301,7 +301,7 @@ COMMAND_TASK_ID=$(printf '%s' "$COMMAND_TASK_ROW" | cut -d'|' -f1)
 echo OK
 
 printf '31/38 query event status using saved conversation context... '
-STATUS_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Como está o evento?\",\"idempotencyKey\":\"smoke-command-status-1\"}")
+STATUS_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Como esta o evento?\",\"idempotencyKey\":\"smoke-command-status-1\"}")
 printf '%s' "$STATUS_COMMAND" | grep -q '"intent":"GET_EVENT_STATUS"' || { echo "status command failed: $STATUS_COMMAND"; exit 1; }
 printf '%s' "$STATUS_COMMAND" | grep -q '"name":"Ana & Pedro"' || { echo 'status query lost conversation context'; exit 1; }
 echo OK
@@ -314,7 +314,7 @@ TASK_STATUS=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\"
 echo OK
 
 printf '33/38 add event note through command engine... '
-NOTE_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Adicione uma observação dizendo que a avó da noiva precisa de acesso facilitado\",\"idempotencyKey\":\"smoke-command-note-1\"}")
+NOTE_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Adicione uma observacao dizendo que a avo da noiva precisa de acesso facilitado\",\"idempotencyKey\":\"smoke-command-note-1\"}")
 printf '%s' "$NOTE_COMMAND" | grep -q '"intent":"ADD_EVENT_NOTE"' || { echo "note command failed: $NOTE_COMMAND"; exit 1; }
 NOTE_COUNT=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT count(*) FROM event_notes WHERE organization_id='$ORG_ID'::uuid AND event_id='$EVENT_ID'::uuid AND body ILIKE '%acesso facilitado%';\"" | tr -d '\r[:space:]')
 [ "$NOTE_COUNT" = '1' ] || { echo "expected one command note, got $NOTE_COUNT"; exit 1; }
@@ -331,7 +331,7 @@ done
 
 printf '35/38 reject sensitive change without mutating event... '
 BEFORE_START=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT start_at::text FROM events WHERE id='$EVENT_ID'::uuid;\"" | tr -d '\r')
-SENSITIVE_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Mude o horário do casamento da Ana para 17h\",\"idempotencyKey\":\"smoke-sensitive-1\"}")
+SENSITIVE_COMMAND=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Mude o horario do casamento da Ana para 17h\",\"idempotencyKey\":\"smoke-sensitive-1\"}")
 printf '%s' "$SENSITIVE_COMMAND" | grep -q '"status":"rejected"' || { echo "sensitive command was not rejected: $SENSITIVE_COMMAND"; exit 1; }
 printf '%s' "$SENSITIVE_COMMAND" | grep -q '"requiresChangeProposal":true' || { echo 'change proposal gate missing'; exit 1; }
 AFTER_START=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT start_at::text FROM events WHERE id='$EVENT_ID'::uuid;\"" | tr -d '\r')
@@ -339,7 +339,7 @@ AFTER_START=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\"
 echo OK
 
 printf '36/38 verify command idempotency... '
-TASK_RETRY=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Crie uma tarefa para confirmar o buffet amanhã às 10h\",\"idempotencyKey\":\"smoke-command-task-1\"}")
+TASK_RETRY=$(curl -fsS -X POST "$BASE_URL/api/v1/commands" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"$PLANNER_SENDER\",\"text\":\"Crie uma tarefa para confirmar o buffet amanha as 10h\",\"idempotencyKey\":\"smoke-command-task-1\"}")
 printf '%s' "$TASK_RETRY" | grep -q '"duplicate":true' || { echo "command retry was not idempotent: $TASK_RETRY"; exit 1; }
 COMMAND_TASK_COUNT=$(docker compose exec -T postgres sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -tAc \"SELECT count(*) FROM event_tasks WHERE source_command_request_id='$COMMAND_REQUEST_ID'::uuid;\"" | tr -d '\r[:space:]')
 [ "$COMMAND_TASK_COUNT" = '1' ] || { echo "expected one task for command request, got $COMMAND_TASK_COUNT"; exit 1; }
