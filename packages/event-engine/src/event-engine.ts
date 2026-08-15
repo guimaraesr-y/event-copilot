@@ -103,6 +103,7 @@ export class EventEngine {
       organizationId: event.organizationId,
       eventId: event.id,
       templateTaskId: templateTask.id,
+      sourceCommandRequestId: null,
       title: templateTask.title,
       description: templateTask.description,
       type: templateTask.type,
@@ -200,6 +201,11 @@ export class EventEngine {
     const event = await this.store.findEventById(input.organizationId, input.eventId)
     if (!event) throw new EventValidationError('Event not found')
 
+    if (input.sourceCommandRequestId) {
+      const existing = await this.store.findTaskBySourceCommandRequestId(input.organizationId, input.sourceCommandRequestId)
+      if (existing) return existing
+    }
+
     const title = input.title.trim()
     if (title.length < 2) throw new EventValidationError('Task title must contain at least 2 characters')
     if (Number.isNaN(input.dueAt.getTime())) throw new EventValidationError('dueAt must be a valid date')
@@ -210,13 +216,14 @@ export class EventEngine {
       organizationId: input.organizationId,
       eventId: input.eventId,
       templateTaskId: null,
+      sourceCommandRequestId: input.sourceCommandRequestId ?? null,
       title,
       description: input.description?.trim() || null,
       type: input.type ?? 'general',
       status: 'pending',
       priority: input.priority ?? 'normal',
       dueAt: input.dueAt,
-      source: 'manual',
+      source: input.source ?? 'manual',
       createdAt: now,
       updatedAt: now,
       completedAt: null,
@@ -235,6 +242,7 @@ export class EventEngine {
         title: task.title,
         dueAt: task.dueAt.toISOString(),
         source: task.source,
+        sourceCommandRequestId: task.sourceCommandRequestId,
       },
     }
 

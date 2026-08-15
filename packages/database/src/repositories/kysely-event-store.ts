@@ -102,6 +102,16 @@ export class KyselyEventStore implements EventStore {
     return row ? this.mapTask(row) : null
   }
 
+  async findTaskBySourceCommandRequestId(organizationId: string, commandRequestId: string): Promise<EventTask | null> {
+    const row = await this.db
+      .selectFrom('event_tasks')
+      .selectAll()
+      .where('organization_id', '=', organizationId)
+      .where('source_command_request_id', '=', commandRequestId)
+      .executeTakeFirst()
+    return row ? this.mapTask(row) : null
+  }
+
   async createTaskWithOutbox(task: EventTask, domainEvent: DomainEvent): Promise<void> {
     await this.db.transaction().execute(async (trx) => {
       await trx.insertInto('event_tasks').values(this.taskValues(task)).execute()
@@ -180,6 +190,7 @@ export class KyselyEventStore implements EventStore {
       organization_id: task.organizationId,
       event_id: task.eventId,
       template_task_id: task.templateTaskId,
+      source_command_request_id: task.sourceCommandRequestId,
       title: task.title,
       description: task.description,
       type: task.type,
@@ -251,6 +262,7 @@ export class KyselyEventStore implements EventStore {
     organization_id: string
     event_id: string
     template_task_id: string | null
+    source_command_request_id: string | null
     title: string
     description: string | null
     type: EventTask['type']
@@ -267,6 +279,7 @@ export class KyselyEventStore implements EventStore {
       organizationId: row.organization_id,
       eventId: row.event_id,
       templateTaskId: row.template_task_id,
+      sourceCommandRequestId: row.source_command_request_id,
       title: row.title,
       description: row.description,
       type: row.type,

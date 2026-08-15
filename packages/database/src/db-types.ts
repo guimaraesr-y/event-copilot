@@ -69,6 +69,7 @@ export interface EventTasksTable {
   organization_id: string
   event_id: string
   template_task_id: string | null
+  source_command_request_id: string | null
   title: string
   description: string | null
   type: 'general' | 'confirmation' | 'document' | 'payment' | 'guest' | 'briefing' | 'other'
@@ -212,6 +213,48 @@ export interface InboundMessagesTable {
   last_error: string | null
 }
 
+
+export interface CommandRequestsTable {
+  id: string
+  organization_id: string
+  sender: string
+  idempotency_key: string
+  raw_text: string
+  explicit_event_id: string | null
+  resolved_event_id: string | null
+  interpreter: 'rule_based' | 'ai'
+  intent: import('@ecc/domain').CommandIntent | null
+  confidence: number | null
+  status: import('@ecc/domain').CommandStatus
+  interpretation: JSONColumnType<import('@ecc/domain').CommandInterpretation | null, import('@ecc/domain').CommandInterpretation | null, import('@ecc/domain').CommandInterpretation | null>
+  result: JSONColumnType<Record<string, unknown> | null, Record<string, unknown> | null, Record<string, unknown> | null>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  processed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  last_error: string | null
+}
+
+export interface ConversationContextsTable {
+  id: string
+  organization_id: string
+  sender: string
+  current_event_id: string | null
+  last_interaction_at: ColumnType<Date, Date | string, Date | string>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
+export interface EventNotesTable {
+  id: string
+  organization_id: string
+  event_id: string
+  source_command_request_id: string
+  body: string
+  created_by_sender: string
+  source: 'command'
+  created_at: ColumnType<Date, Date | string, never>
+}
+
 export interface ActivityEntriesTable {
   id: string
   organization_id: string
@@ -280,6 +323,9 @@ export interface DatabaseSchema {
   outbound_messages: OutboundMessagesTable
   messaging_webhook_events: MessagingWebhookEventsTable
   inbound_messages: InboundMessagesTable
+  command_requests: CommandRequestsTable
+  conversation_contexts: ConversationContextsTable
+  event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable
   inbox_items: InboxItemsTable
   outbox_events: OutboxEventsTable

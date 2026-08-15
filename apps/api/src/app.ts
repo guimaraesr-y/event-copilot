@@ -9,10 +9,11 @@ import {
   KyselyMessageStore,
   KyselyInboundMessageStore,
   OperationalRepository,
+  KyselyCommandStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
@@ -23,6 +24,8 @@ import { registerMessagingRoutes } from './routes/messaging.ts'
 import { registerMessagingWebhookRoutes } from './routes/messaging-webhooks.ts'
 import { registerInboundMessageRoutes } from './routes/inbound-messages.ts'
 import { registerOperationalRoutes } from './routes/operations.ts'
+import { registerCommandRoutes } from './routes/commands.ts'
+import { createCommandInterpreter } from './command-interpreter.ts'
 import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
@@ -34,6 +37,8 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const domainEventGatewayRepository = new DomainEventGatewayRepository(db)
   const messagingEngine = new MessagingEngine({ store: new KyselyMessageStore(db), provider: createMessagingProvider() })
   const operationalRepository = new OperationalRepository(db)
+  const commandStore = new KyselyCommandStore(db)
+  const commandEngine = new CommandEngine({ store: commandStore, eventEngine, vendorEngine, interpreter: createCommandInterpreter() })
   const inboundEngine = new InboundEngine({
     store: new KyselyInboundMessageStore(db),
     vendorEngine,
@@ -55,6 +60,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerMessagingWebhookRoutes(app, messagingEngine, createMessagingWebhookRegistry())
   registerInboundMessageRoutes(app, inboundEngine)
   registerOperationalRoutes(app, organizationRepository, operationalRepository)
+  registerCommandRoutes(app, organizationRepository, commandEngine)
 
   return app
 }

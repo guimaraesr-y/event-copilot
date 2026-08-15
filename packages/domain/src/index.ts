@@ -12,3 +12,5 @@ export * from './message.ts'
 export * from './inbound.ts'
 
 export * from './operations.ts'
+
+export * from './command.ts'

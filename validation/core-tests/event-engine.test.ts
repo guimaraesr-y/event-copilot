@@ -64,6 +64,12 @@ class InMemoryStore implements EventStore {
       (task) => task.organizationId === organizationId && task.eventId === eventId && task.id === taskId,
     ) ?? null
   }
+
+  async findTaskBySourceCommandRequestId(organizationId: string, commandRequestId: string): Promise<EventTask | null> {
+    return this.tasks.find(
+      (task) => task.organizationId === organizationId && task.sourceCommandRequestId === commandRequestId,
+    ) ?? null
+  }
 }
 
 function assert(condition: unknown, message: string): asserts condition {

@@ -65,6 +65,7 @@ export interface EventStore {
   createTaskWithOutbox(task: EventTask, domainEvent: DomainEvent): Promise<void>
   updateTaskWithOutbox(task: EventTask, domainEvent: DomainEvent): Promise<void>
   findTaskById(organizationId: string, eventId: string, taskId: string): Promise<EventTask | null>
+  findTaskBySourceCommandRequestId(organizationId: string, commandRequestId: string): Promise<EventTask | null>
 }
 
 export class EventValidationError extends Error {

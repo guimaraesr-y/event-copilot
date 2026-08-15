@@ -15,6 +15,15 @@ export function scheduleRelativeToEvent(
   dueTime: string,
   timeZone: string,
 ): Date {
+  return scheduleRelativeToReference(eventStartAt, offsetDays, dueTime, timeZone)
+}
+
+export function scheduleRelativeToReference(
+  referenceAt: Date,
+  offsetDays: number,
+  dueTime: string,
+  timeZone: string,
+): Date {
   if (!Number.isInteger(offsetDays) || offsetDays < -3650 || offsetDays > 3650) {
     throw new EventValidationError('offsetDays must be an integer between -3650 and 3650')
   }
@@ -23,8 +32,8 @@ export function scheduleRelativeToEvent(
   if (!match) throw new EventValidationError('dueTime must use HH:mm format')
 
   assertTimeZone(timeZone)
-  const eventLocal = partsInTimeZone(eventStartAt, timeZone)
-  const shifted = new Date(Date.UTC(eventLocal.year, eventLocal.month - 1, eventLocal.day + offsetDays))
+  const referenceLocal = partsInTimeZone(referenceAt, timeZone)
+  const shifted = new Date(Date.UTC(referenceLocal.year, referenceLocal.month - 1, referenceLocal.day + offsetDays))
   const hour = Number(match[1])
   const minute = Number(match[2])
 

@@ -1,14 +1,16 @@
-Mini-feature 07 validation
+Mini-feature 08 validation
 - Foundation/Compose structural validation: PASS
 - Full TypeScript structural compile: PASS
-- Strict domain/event/vendor/messaging/inbound/projector compile: PASS
+- Strict domain/event/vendor/messaging/inbound/projector/command compile: PASS
 - EventEngine behavioral scenarios: 8 PASS
 - VendorEngine behavioral scenarios: 7 PASS
 - MessagingEngine behavioral scenarios: 18 PASS
 - InboundEngine behavioral scenarios: 7 PASS
-- OperationalProjector behavioral scenarios: 5 PASS
+- OperationalProjector behavioral scenarios: 7 PASS
+- CommandInterpreter behavioral scenarios: 4 PASS
+- CommandEngine behavioral scenarios: 8 PASS
 - MessagingWebhookAdapter behavioral scenarios: 12 PASS
-- Total behavioral scenarios: 57 PASS
-- n8n workflow structure/registration script: preserved from validated Feature 06 runtime fix
+- Total behavioral scenarios: 71 PASS
+- AI interpreter network contract: validated with an injected Responses API fixture; no real OpenAI request was made.
 - shell syntax (`smoke.sh`, `n8n-sync.sh`, `smoke-env.sh`): PASS
 - Docker/n8n/Postgres runtime smoke: NOT RUN in this environment (Docker unavailable). Run `./scripts/smoke-env.sh` locally.

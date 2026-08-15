@@ -15,6 +15,7 @@ export interface EventTask {
   organizationId: string
   eventId: string
   templateTaskId: string | null
+  sourceCommandRequestId: string | null
   title: string
   description: string | null
   type: TaskType
@@ -35,6 +36,8 @@ export interface CreateManualTaskInput {
   type?: TaskType
   priority?: TaskPriority
   dueAt: Date
+  source?: TaskSource
+  sourceCommandRequestId?: string | null
 }
 
 export interface UpdateTaskInput {

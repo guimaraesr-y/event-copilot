@@ -66,6 +66,21 @@ export class OperationalProjector {
           inbox: inbox(eventId, 'inbound_message_review', 'warning', 'inbound_message', message.aggregateId, 'Resposta de fornecedor precisa de revisão', truncate(reason, 500), p),
         }
       }
+      case 'task.created': {
+        const title = text(p.title) ?? 'Tarefa'
+        const actor = text(p.source) === 'manual' ? 'user' : 'automation'
+        return {
+          activity: activity(eventId, actor, 'task', 'task.created', 'task', message.aggregateId, `Tarefa criada: ${title}`, null, p),
+          inbox: null,
+        }
+      }
+      case 'event.note_added': {
+        const body = text(p.text)
+        return {
+          activity: activity(eventId, 'user', 'event', 'event.note_added', 'event_note', message.aggregateId, 'Observação adicionada ao evento', body ? truncate(body, 300) : null, p),
+          inbox: null,
+        }
+      }
       case 'task.completed': {
         return {
           activity: activity(eventId, 'system', 'task', 'task.completed', 'task', message.aggregateId, 'Tarefa concluída', null, p),

@@ -29,11 +29,17 @@ if [ "${WHATSAPP_PROVIDER:-}" != "mock" ]; then
   exit 1
 fi
 
+if [ "${COMMAND_INTERPRETER:-}" != "rule_based" ]; then
+  echo "Refusing to run: smoke environment must use COMMAND_INTERPRETER=rule_based." >&2
+  exit 1
+fi
+
 cd "$ROOT_DIR"
 
 echo "Smoke project : $COMPOSE_PROJECT_NAME"
 echo "Smoke gateway : $BASE_URL"
 echo "Messaging     : $WHATSAPP_PROVIDER"
+echo "Commands      : $COMMAND_INTERPRETER"
 
 # A dedicated smoke project makes destructive reset safe and deterministic.
 # Set SMOKE_RESET=0 to preserve the previous smoke database/n8n volume.

@@ -6,3 +6,5 @@ export * from './vendors.ts'
 export * from './domain-events.ts'
 
 export * from './messaging.ts'
+
+export * from './commands.ts'
