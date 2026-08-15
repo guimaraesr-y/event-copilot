@@ -123,3 +123,58 @@ python3 scripts/validate_feature_08.py
 ```
 
 Docker runtime validation is performed locally through `./scripts/smoke-env.sh` because Docker is not available in the artifact-generation environment.
+
+
+## AI providers: Ollama first, OpenAI optional
+
+The Command Engine is provider-agnostic. `COMMAND_INTERPRETER=ai` delegates structured command extraction to the provider selected by `AI_PROVIDER`.
+
+```env
+COMMAND_INTERPRETER=ai
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_COMMAND_MODEL=qwen3:4b
+OLLAMA_COMMAND_TIMEOUT_MS=120000
+OLLAMA_KEEP_ALIVE=10m
+```
+
+Ollama is included in Compose under the optional `ai` profile so the normal deterministic smoke stack does not download or start an LLM:
+
+```sh
+./scripts/ollama-setup.sh
+```
+
+This starts `ollama/ollama`, waits for readiness and pulls the configured model. The default `qwen3:4b` is intentionally a relatively small starting point; change `OLLAMA_COMMAND_MODEL` to evaluate another local model.
+
+To measure whether the self-hosted model is good enough for ECC command extraction:
+
+```sh
+./scripts/ollama-command-check.sh
+```
+
+The check runs five live interpretation scenarios and prints correctness plus latency per command and average latency. It does not mutate the ECC database.
+
+To run the real API with the self-hosted interpreter:
+
+```env
+COMMAND_INTERPRETER=ai
+AI_PROVIDER=ollama
+```
+
+then:
+
+```sh
+docker compose --profile ai up -d ollama
+docker compose up -d --build api
+```
+
+OpenAI remains available by configuration:
+
+```env
+COMMAND_INTERPRETER=ai
+AI_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_COMMAND_MODEL=gpt-5.6
+```
+
+The provider interface intentionally keeps Gemini as a future adapter without changing `CommandEngine` or its safety gates.

@@ -75,28 +75,10 @@ export class RuleBasedCommandInterpreter implements CommandInterpreter {
   }
 }
 
-export interface AICommandInterpreterOptions {
-  apiKey: string
-  model?: string
-  baseUrl?: string
-  timeoutMs?: number
-  fetchImpl?: typeof fetch
-}
-
 export class AICommandInterpreter implements CommandInterpreter {
   readonly kind = 'ai' as const
-  private readonly model: string
-  private readonly baseUrl: string
-  private readonly timeoutMs: number
-  private readonly fetchImpl: typeof fetch
 
-  constructor(private readonly options: AICommandInterpreterOptions) {
-    if (!options.apiKey.trim()) throw new CommandInterpreterError('OPENAI_API_KEY is required when COMMAND_INTERPRETER=ai')
-    this.model = options.model?.trim() || 'gpt-5.6'
-    this.baseUrl = (options.baseUrl?.trim() || 'https://api.openai.com/v1').replace(/\/$/, '')
-    this.timeoutMs = options.timeoutMs ?? 20_000
-    this.fetchImpl = options.fetchImpl ?? fetch
-  }
+  constructor(private readonly provider: import('./ai-command-provider.ts').AICommandProvider) {}
 
   async interpret(input: CommandInterpreterInput): Promise<CommandInterpretation> {
     const system = [
@@ -119,59 +101,13 @@ export class AICommandInterpreter implements CommandInterpreter {
       })),
     }
 
-    const response = await this.fetchImpl(`${this.baseUrl}/responses`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.options.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.model,
-        store: false,
-        instructions: system,
-        input: JSON.stringify(context),
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'ecc_command_interpretation',
-            strict: true,
-            schema: COMMAND_OUTPUT_SCHEMA,
-          },
-        },
-        max_output_tokens: 1200,
-      }),
-      signal: AbortSignal.timeout(this.timeoutMs),
+    const parsed = await this.provider.generate({
+      system,
+      context,
+      schema: COMMAND_OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     })
-
-    if (!response.ok) {
-      const body = await response.text()
-      throw new CommandInterpreterError(`OpenAI Responses API returned ${response.status}: ${body.slice(0, 500)}`)
-    }
-
-    const payload = await response.json() as any
-    if (payload.status === 'incomplete') {
-      throw new CommandInterpreterError(`OpenAI response incomplete: ${JSON.stringify(payload.incomplete_details ?? {})}`)
-    }
-    const refusal = findContent(payload, 'refusal')
-    if (refusal) throw new CommandInterpreterError(`OpenAI refused command interpretation: ${String(refusal.refusal ?? refusal.text ?? 'refused')}`)
-    const outputText = findContent(payload, 'output_text')?.text
-    if (typeof outputText !== 'string' || !outputText.trim()) {
-      throw new CommandInterpreterError('OpenAI response did not contain structured output text')
-    }
-
-    let parsed: unknown
-    try { parsed = JSON.parse(outputText) } catch { throw new CommandInterpreterError('OpenAI structured output was not valid JSON') }
     return validateInterpretation(parsed)
   }
-}
-
-function findContent(payload: any, type: string): any | null {
-  for (const item of Array.isArray(payload?.output) ? payload.output : []) {
-    for (const content of Array.isArray(item?.content) ? item.content : []) {
-      if (content?.type === type) return content
-    }
-  }
-  return null
 }
 
 export function validateInterpretation(value: unknown): CommandInterpretation {

@@ -11,6 +11,8 @@ export * from './supplier-response-interpreter.ts'
 
 export * from './operational-projector.ts'
 
+export * from './ai-command-provider.ts'
+
 export * from './command-interpreter.ts'
 
 export * from './command-engine.ts'

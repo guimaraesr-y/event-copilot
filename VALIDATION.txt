@@ -14,3 +14,5 @@ Mini-feature 08 validation
 - AI interpreter network contract: validated with an injected Responses API fixture; no real OpenAI request was made.
 - shell syntax (`smoke.sh`, `n8n-sync.sh`, `smoke-env.sh`): PASS
 - Docker/n8n/Postgres runtime smoke: NOT RUN in this environment (Docker unavailable). Run `./scripts/smoke-env.sh` locally.
+
+Feature 08.1: provider-agnostic AI adapter, Ollama structured-output provider, OpenAI provider regression, Compose Ollama profile, live Ollama quality/latency check.

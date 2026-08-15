@@ -36,6 +36,11 @@ services:
       META_APP_SECRET: ${META_APP_SECRET:-}
       META_WEBHOOK_VERIFY_TOKEN: ${META_WEBHOOK_VERIFY_TOKEN:-}
       COMMAND_INTERPRETER: ${COMMAND_INTERPRETER:-rule_based}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_COMMAND_MODEL: ${OLLAMA_COMMAND_MODEL:-qwen3:4b}
+      OLLAMA_COMMAND_TIMEOUT_MS: ${OLLAMA_COMMAND_TIMEOUT_MS:-120000}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_COMMAND_MODEL: ${OPENAI_COMMAND_MODEL:-gpt-5.6}
       OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
@@ -98,6 +103,22 @@ services:
       retries: 30
       start_period: 15s
 
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    environment:
+      OLLAMA_COMMAND_MODEL: ${OLLAMA_COMMAND_MODEL:-qwen3:4b}
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
   gateway:
     image: caddy:2.10-alpine
     ports:
@@ -113,3 +134,4 @@ services:
 volumes:
   postgres-data:
   n8n-data:
+  ollama-data:
