@@ -14,6 +14,10 @@ version=json.loads(text('package.json')).get('version')
 if version!='0.8.2': fail(f'version expected 0.8.2, got {version}')
 for n in ['011_operational_agent','migration011OperationalAgent']:
   if n not in text('packages/database/src/migrate.ts'): fail(f'migrate missing {n}')
+for n in ['012_operational_agent_tool_trace_jsonb','migration012OperationalAgentToolTraceJsonb']:
+  if n not in text('packages/database/src/migrate.ts'): fail(f'migrate missing {n}')
+for n in ['agent_turns_tool_trace_array_check',"jsonb_typeof(tool_trace) is distinct from 'array'"]:
+  if n not in text('packages/database/src/migrations/012_operational_agent_tool_trace_jsonb.ts'): fail(f'migration 012 missing {n}')
 for n in ["createTable('agent_turns')",'agent_turns_org_idempotency_unique',"interpreter in ('rule_based','ai','agent')"]:
   if n not in text('packages/database/src/migrations/011_operational_agent.ts'): fail(f'migration 011 missing {n}')
 for n in ['get_workspace_overview','get_event_details','get_event_activity','get_inbox','create_task','executeStructuredToolCommand','OPERATIONAL_AGENT']:

@@ -1,6 +1,7 @@
 import type { Kysely, Selectable } from 'kysely'
 import type { AgentTurn, AgentTurnStore, CreateAgentTurnInput, UpdateAgentTurnInput } from '@ecc/domain'
 import type { AgentTurnsTable, DatabaseSchema } from '../db-types.ts'
+import { normalizeAgentToolTrace, serializeAgentToolTrace } from './agent-turn-json.ts'
 
 export class KyselyAgentStore implements AgentTurnStore {
   constructor(private readonly db: Kysely<DatabaseSchema>) {}
@@ -18,7 +19,9 @@ export class KyselyAgentStore implements AgentTurnStore {
       provider: input.provider,
       model: input.model,
       model_calls: 0,
-      tool_trace: [],
+      // node-postgres serializes JS arrays as PostgreSQL arrays. For a jsonb column that
+      // can turn [] into the JSON object {}. Send JSON text explicitly instead.
+      tool_trace: serializeAgentToolTrace([]),
       created_at: input.now,
       updated_at: input.now,
       completed_at: null,
@@ -39,7 +42,7 @@ export class KyselyAgentStore implements AgentTurnStore {
     if ('assistantText' in input) patch.assistant_text = input.assistantText ?? null
     if (input.status !== undefined) patch.status = input.status
     if (input.modelCalls !== undefined) patch.model_calls = input.modelCalls
-    if (input.toolTrace !== undefined) patch.tool_trace = input.toolTrace
+    if (input.toolTrace !== undefined) patch.tool_trace = serializeAgentToolTrace(input.toolTrace)
     if ('completedAt' in input) patch.completed_at = input.completedAt ?? null
     if ('lastError' in input) patch.last_error = input.lastError ?? null
 
@@ -75,7 +78,9 @@ function mapTurn(row: Selectable<AgentTurnsTable>): AgentTurn {
     provider: row.provider,
     model: row.model,
     modelCalls: row.model_calls,
-    toolTrace: row.tool_trace,
+    // Be tolerant of rows written by Feature 08.2 before the JSONB-array fix. Those
+    // rows may contain {} instead of [] and must not crash the agent/history path.
+    toolTrace: normalizeAgentToolTrace(row.tool_trace),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,

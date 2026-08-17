@@ -322,7 +322,7 @@ export interface AgentTurnsTable {
   provider: import('@ecc/domain').OperationalAgentProviderKind
   model: string
   model_calls: ColumnType<number, number | undefined, number>
-  tool_trace: JSONColumnType<import('@ecc/domain').AgentToolTraceEntry[], import('@ecc/domain').AgentToolTraceEntry[], import('@ecc/domain').AgentToolTraceEntry[]>
+  tool_trace: JSONColumnType<import('@ecc/domain').AgentToolTraceEntry[], string, string>
   created_at: ColumnType<Date, Date | string, never>
   updated_at: ColumnType<Date, Date | string, Date | string>
   completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
