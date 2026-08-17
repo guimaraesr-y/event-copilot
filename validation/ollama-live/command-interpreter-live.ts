@@ -1,7 +1,7 @@
 import { AICommandInterpreter, OllamaCommandProvider } from '../../packages/event-engine/src/index.ts'
 
 const model=process.env.OLLAMA_COMMAND_MODEL?.trim() || 'qwen3:4b'
-const baseUrl=process.env.OLLAMA_BASE_URL?.trim() || 'http://ollama:11434'
+const baseUrl=process.env.OLLAMA_BASE_URL?.trim() || 'http://127.0.0.1:11434'
 const timeoutMs=Number.parseInt(process.env.OLLAMA_COMMAND_TIMEOUT_MS || '120000',10)
 const provider=new OllamaCommandProvider({model,baseUrl,timeoutMs,keepAlive:process.env.OLLAMA_KEEP_ALIVE || '10m'})
 const interpreter=new AICommandInterpreter(provider)
