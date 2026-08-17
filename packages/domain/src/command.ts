@@ -16,7 +16,7 @@ export type CommandIntent = (typeof COMMAND_INTENTS)[number]
 
 export const COMMAND_STATUSES = ['received','processing','processed','needs_review','rejected','failed'] as const
 export type CommandStatus = (typeof COMMAND_STATUSES)[number]
-export type CommandInterpreterKind = 'rule_based' | 'ai'
+export type CommandInterpreterKind = 'rule_based' | 'ai' | 'agent'
 
 export interface CommandEventOption {
   id: string

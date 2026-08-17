@@ -15,3 +15,5 @@ export * from './repositories/kysely-inbound-message-store.ts'
 export * from './repositories/operational-repository.ts'
 
 export * from './repositories/kysely-command-store.ts'
+
+export * from './repositories/kysely-agent-store.ts'

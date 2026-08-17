@@ -11,16 +11,16 @@ The command boundary is currently the authenticated/tenant-scoped API (`POST /ap
 Both implementations conform to `CommandInterpreter`:
 
 - `RuleBasedCommandInterpreter`: deterministic parser used by the full smoke and local tests.
-- `AICommandInterpreter`: OpenAI Responses API + strict Structured Outputs. It only returns a `CommandInterpretation`; it never accesses repositories or executes a mutation.
+- `AICommandInterpreter`: provider-agnostic interpreter. `AI_PROVIDER=ollama|openai` selects the adapter; both only return a `CommandInterpretation` and never access repositories or execute a mutation.
 
 Configuration:
 
 ```env
 COMMAND_INTERPRETER=rule_based # or ai
+AI_PROVIDER=ollama # or openai
+OLLAMA_COMMAND_MODEL=qwen3:4b
 OPENAI_API_KEY=
 OPENAI_COMMAND_MODEL=gpt-5.6
-OPENAI_API_BASE_URL=https://api.openai.com/v1
-OPENAI_COMMAND_TIMEOUT_MS=20000
 ```
 
 The smoke environment always pins `COMMAND_INTERPRETER=rule_based` and refuses to run otherwise.
@@ -117,6 +117,6 @@ Example:
 
 ## AI path
 
-The AI implementation calls `POST /v1/responses` and requests strict JSON Schema output. All schema fields are required and inapplicable fields are `null`. The returned JSON is validated again locally before the `CommandEngine` consumes it.
+`AICommandInterpreter` delegates to an `AICommandProvider`. Ollama uses `/api/chat` with JSON-schema structured output; OpenAI uses the Responses API with strict JSON Schema output. The returned structure is validated locally again before the `CommandEngine` consumes it.
 
-The AI path is not required for the deterministic smoke test and no OpenAI key is present in `.env.smoke`.
+The AI path is not required for the deterministic smoke test. `.env.smoke` pins `COMMAND_INTERPRETER=rule_based`.

@@ -16,3 +16,7 @@ export * from './ai-command-provider.ts'
 export * from './command-interpreter.ts'
 
 export * from './command-engine.ts'
+
+export * from './operational-agent-provider.ts'
+
+export * from './operational-agent.ts'

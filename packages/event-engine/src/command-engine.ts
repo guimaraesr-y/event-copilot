@@ -7,6 +7,7 @@ import type {
   EventTask,
   EventVendor,
   CommandInterpreter,
+  CommandInterpreterKind,
 } from '@ecc/domain'
 import { CommandRequestNotFoundError, CommandValidationError } from '@ecc/domain'
 import type { EventEngine } from './event-engine.ts'
@@ -48,6 +49,24 @@ export class CommandEngine {
   }
 
   async execute(input: ExecuteCommandInput): Promise<CommandExecutionResult> {
+    return this.executeWithInterpreter(input, this.deps.interpreter.kind, (context) => this.deps.interpreter.interpret(context))
+  }
+
+  /**
+   * Executes an already-structured command through the exact same domain path used by
+   * the conversational command interpreter. This is intentionally server-internal:
+   * Operational Agent tools validate their arguments and delegate here instead of
+   * letting the model call repositories or SQL directly.
+   */
+  async executeStructured(input: ExecuteCommandInput, interpretation: CommandInterpretation): Promise<CommandExecutionResult> {
+    return this.executeWithInterpreter(input, 'agent', async () => interpretation)
+  }
+
+  private async executeWithInterpreter(
+    input: ExecuteCommandInput,
+    interpreterKind: CommandInterpreterKind,
+    interpret: (context: Parameters<CommandInterpreter['interpret']>[0]) => Promise<CommandInterpretation>,
+  ): Promise<CommandExecutionResult> {
     const sender = input.sender.trim()
     const text = input.text.trim()
     const key = input.idempotencyKey.trim()
@@ -58,7 +77,7 @@ export class CommandEngine {
     const now = this.now()
     const { request: initial, created } = await this.deps.store.createRequestIfAbsent({
       id: this.newId(), organizationId: input.organizationId, sender, idempotencyKey: key, rawText: text,
-      explicitEventId: input.explicitEventId ?? null, interpreter: this.deps.interpreter.kind, now,
+      explicitEventId: input.explicitEventId ?? null, interpreter: interpreterKind, now,
     })
 
     if (!created) {
@@ -75,7 +94,7 @@ export class CommandEngine {
       const context = await this.deps.store.getConversationContext(input.organizationId, sender)
       const current = context?.currentEventId ? events.find((event) => event.id === context.currentEventId) ?? null : null
 
-      const interpretation = await this.deps.interpreter.interpret({
+      const interpretation = await interpret({
         text,
         now,
         timezone: input.organizationTimezone,
@@ -139,7 +158,7 @@ export class CommandEngine {
           result = await this.pendingVendors(input.organizationId, event)
           break
         case 'CREATE_TASK':
-          result = await this.createTask(input.organizationId, event, initial.id, interpretation)
+          result = await this.createTask(input.organizationId, event, initial.id, interpretation, interpreterKind)
           break
         case 'COMPLETE_TASK':
           result = await this.completeTask(input.organizationId, event, text, interpretation)
@@ -199,7 +218,7 @@ export class CommandEngine {
     return { reply, event: serializeEventRef(event), vendors: vendors.map(serializeVendorRef) }
   }
 
-  private async createTask(organizationId: string, event: Event, requestId: string, interpretation: CommandInterpretation): Promise<Record<string, unknown>> {
+  private async createTask(organizationId: string, event: Event, requestId: string, interpretation: CommandInterpretation, interpreterKind: CommandInterpreterKind): Promise<Record<string, unknown>> {
     const title = interpretation.taskTitle?.trim()
     if (!title) return { reply: 'Entendi que você quer criar uma tarefa, mas faltou o título.', needsReview: true, reason: 'task_title_required' }
     if (!interpretation.dueAt) return { reply: 'Entendi a tarefa, mas preciso de uma data ou prazo para criá-la.', needsReview: true, reason: 'task_due_at_required' }
@@ -207,7 +226,7 @@ export class CommandEngine {
     if (Number.isNaN(dueAt.getTime())) return { reply: 'Não consegui interpretar o prazo da tarefa.', needsReview: true, reason: 'invalid_task_due_at' }
     const task = await this.deps.eventEngine.createManualTask({
       organizationId, eventId: event.id, title, dueAt,
-      source: this.deps.interpreter.kind === 'ai' ? 'ai' : 'automation',
+      source: interpreterKind === 'rule_based' ? 'automation' : 'ai',
       sourceCommandRequestId: requestId,
     })
     return { reply: `Tarefa criada em ${event.name}: ${task.title}.`, task: serializeTaskRef(task), event: serializeEventRef(event) }

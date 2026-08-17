@@ -9,7 +9,7 @@ sync_workflow() {
   label="$3"
 
   printf 'Importing %s... ' "$label"
-  MSYS_NO_PATHCONV=1 docker compose exec -T n8n n8n import:workflow --input="$file" >/dev/null
+  docker compose exec -T n8n n8n import:workflow --input="$file" >/dev/null
   echo OK
 
   printf 'Publishing %s... ' "$label"

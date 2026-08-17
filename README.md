@@ -1,36 +1,29 @@
 # Event Command Center
 
-Current version: **0.8.0 — Text Command Engine (Rule-based + AI)**.
+Current version: **0.8.2 — Operational Agent**.
 
-The Event Command Center is being built as a vertical event-operations backend. PostgreSQL is the source of truth, domain engines own business transitions, the transactional outbox provides durable domain events, and n8n orchestrates external effects.
+The Event Command Center is a vertical event-operations backend. PostgreSQL is the source of truth, domain engines own business transitions, the transactional outbox provides durable domain events, and n8n orchestrates external effects.
 
-## Current flow
-
-```text
-Event / Vendor / Messaging / Inbound / Command Engines
-                 ↓
-          PostgreSQL + Outbox
-                 ↓
-               Worker
-          ┌──────┴──────┐
-          ↓             ↓
-Operational Projector   n8n
-          ↓             ↓
- Activity / Inbox    External effects
-```
-
-Messaging uses a provider-neutral boundary:
+## Architecture
 
 ```text
-Provider webhook
-      ↓
-/api/v1/messaging/webhooks/:provider
-      ↓
-MessagingWebhookAdapter (mock | meta)
-      ↓
-Canonical event
-      ↓
-MessagingEngine
+External channels / API
+        ↓
+Operational Agent or deterministic endpoints
+        ↓
+server-owned tools / CommandEngine
+        ↓
+Event · Vendor · Messaging · Inbound Engines
+        ↓
+PostgreSQL + Transactional Outbox
+        ↓
+Worker
+   ┌────┴────┐
+   ↓         ↓
+Operational  n8n
+Projector    external effects
+   ↓
+Activity / Inbox
 ```
 
 ## Implemented slices
@@ -44,33 +37,63 @@ MessagingEngine
 6. Supplier Inbound + deterministic response resolution
 7. Operational Inbox + Activity Log
 8. Text Command Engine (`rule_based | ai`)
+8.1 AI provider abstraction (`ollama | openai`) + local Ollama Compose profile
+8.2 Operational Agent with multi-event conversation and server-owned tools
 
-## Feature 08
+## Operational Agent
 
-The planner can now issue safe text commands through:
-
-```text
-POST /api/v1/commands
-```
-
-Supported commands include event status, open tasks, pending vendors, task creation/completion, event notes and conversation-context selection. Sensitive event changes are recognized but **not applied**; they return `requiresChangeProposal=true` for the future Change Proposal feature.
-
-Two interpreters implement the same contract:
+The AI is no longer restricted to translating every planner message into one intent. The Agent can inspect several events, query current operational state, use short persisted conversational history and call a small allowlist of tools.
 
 ```text
-RuleBasedCommandInterpreter  → deterministic smoke/tests
-AICommandInterpreter         → OpenAI Responses API + strict Structured Outputs
+Planner
+   ↓
+OperationalAgent
+   ↓
+Ollama provider
+   ↓
+read tools ──────────────→ domain/query engines
+write tools → CommandEngine.executeStructured()
+                         ↓
+                     domain engines
 ```
 
-Set the real environment to AI with:
+The model never gets database access. Sensitive event changes (date/time, guest count, venue/address) have no tool in this slice and cannot be applied directly.
+
+See `docs/mini-feature-08.2.md`.
+
+## AI configuration
+
+Command Interpreter remains available for direct command endpoints:
 
 ```env
-COMMAND_INTERPRETER=ai
-OPENAI_API_KEY=...
-OPENAI_COMMAND_MODEL=gpt-5.6
+COMMAND_INTERPRETER=rule_based
+# or ai
+AI_PROVIDER=ollama
+OLLAMA_COMMAND_MODEL=qwen3:4b
 ```
 
-The deterministic smoke always uses `COMMAND_INTERPRETER=rule_based` and contains no OpenAI credential. See `docs/mini-feature-08.md`.
+Operational Agent:
+
+```env
+OPERATIONAL_AGENT_PROVIDER=ollama
+# blank = reuse OLLAMA_COMMAND_MODEL
+OLLAMA_AGENT_MODEL=
+# prompt | native
+OLLAMA_AGENT_TOOL_MODE=prompt
+```
+
+Ollama is optional and lives behind the `ai` Compose profile:
+
+```bash
+./scripts/ollama-setup.sh
+docker compose --profile ai up --build -d
+```
+
+To talk to the Agent against an existing tenant:
+
+```bash
+bun scripts/operational-agent-chat.ts --organization <ORGANIZATION_UUID>
+```
 
 ## Local development
 
@@ -82,28 +105,19 @@ docker compose up --build -d
 
 ## Full deterministic smoke
 
-The smoke environment is isolated from your normal `.env`, Meta credentials, database and n8n volumes:
-
 ```bash
 ./scripts/smoke-env.sh
 ```
 
-It uses:
+The smoke environment is isolated from the normal `.env` and forces:
 
 ```text
-COMPOSE_PROJECT_NAME=event-command-center-smoke
-GATEWAY_PORT=18080
 WHATSAPP_PROVIDER=mock
 COMMAND_INTERPRETER=rule_based
+OPERATIONAL_AGENT_PROVIDER=deterministic
 ```
 
-By default the dedicated smoke volumes are reset before every run. To preserve them for debugging:
-
-```bash
-SMOKE_RESET=0 ./scripts/smoke-env.sh
-```
-
-The full smoke currently covers foundation through Feature 08, including supplier confirmation, outbound/inbound messaging, activity/inbox projection, conversation context, rule-based command execution, command idempotency and sensitive-change gating.
+The full smoke currently has **43 steps**, covering foundation through Operational Agent delegation and turn idempotency without calling a real AI provider.
 
 ## Meta WhatsApp
 
@@ -119,62 +133,7 @@ n8n never parses Meta-specific webhook payloads.
 
 ```bash
 python3 scripts/validate_foundation.py
-python3 scripts/validate_feature_08.py
+python3 scripts/validate_feature_082.py
 ```
 
-Docker runtime validation is performed locally through `./scripts/smoke-env.sh` because Docker is not available in the artifact-generation environment.
-
-
-## AI providers: Ollama first, OpenAI optional
-
-The Command Engine is provider-agnostic. `COMMAND_INTERPRETER=ai` delegates structured command extraction to the provider selected by `AI_PROVIDER`.
-
-```env
-COMMAND_INTERPRETER=ai
-AI_PROVIDER=ollama
-OLLAMA_BASE_URL=http://ollama:11434
-OLLAMA_COMMAND_MODEL=qwen3:4b
-OLLAMA_COMMAND_TIMEOUT_MS=120000
-OLLAMA_KEEP_ALIVE=10m
-```
-
-Ollama is included in Compose under the optional `ai` profile so the normal deterministic smoke stack does not download or start an LLM:
-
-```sh
-./scripts/ollama-setup.sh
-```
-
-This starts `ollama/ollama`, waits for readiness and pulls the configured model. The default `qwen3:4b` is intentionally a relatively small starting point; change `OLLAMA_COMMAND_MODEL` to evaluate another local model.
-
-To measure whether the self-hosted model is good enough for ECC command extraction:
-
-```sh
-./scripts/ollama-command-check.sh
-```
-
-The check runs five live interpretation scenarios and prints correctness plus latency per command and average latency. It does not mutate the ECC database.
-
-To run the real API with the self-hosted interpreter:
-
-```env
-COMMAND_INTERPRETER=ai
-AI_PROVIDER=ollama
-```
-
-then:
-
-```sh
-docker compose --profile ai up -d ollama
-docker compose up -d --build api
-```
-
-OpenAI remains available by configuration:
-
-```env
-COMMAND_INTERPRETER=ai
-AI_PROVIDER=openai
-OPENAI_API_KEY=...
-OPENAI_COMMAND_MODEL=gpt-5.6
-```
-
-The provider interface intentionally keeps Gemini as a future adapter without changing `CommandEngine` or its safety gates.
+Docker runtime validation is performed locally through `./scripts/smoke-env.sh`.

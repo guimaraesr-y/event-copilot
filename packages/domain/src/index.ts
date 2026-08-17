@@ -14,3 +14,5 @@ export * from './inbound.ts'
 export * from './operations.ts'
 
 export * from './command.ts'
+
+export * from './agent.ts'

@@ -10,6 +10,7 @@ import { migration007RestrictMessagingProviders } from './migrations/007_restric
 import { migration008SupplierInbound } from './migrations/008_supplier_inbound.ts'
 import { migration009OperationalInboxActivity } from './migrations/009_operational_inbox_activity.ts'
 import { migration010CommandEngine } from './migrations/010_command_engine.ts'
+import { migration011OperationalAgent } from './migrations/011_operational_agent.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -27,6 +28,7 @@ const migrator = new Migrator({
         '008_supplier_inbound': migration008SupplierInbound,
         '009_operational_inbox_activity': migration009OperationalInboxActivity,
         '010_command_engine': migration010CommandEngine,
+        '011_operational_agent': migration011OperationalAgent,
       }
     },
   },

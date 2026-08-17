@@ -222,7 +222,7 @@ export interface CommandRequestsTable {
   raw_text: string
   explicit_event_id: string | null
   resolved_event_id: string | null
-  interpreter: 'rule_based' | 'ai'
+  interpreter: 'rule_based' | 'ai' | 'agent'
   intent: import('@ecc/domain').CommandIntent | null
   confidence: number | null
   status: import('@ecc/domain').CommandStatus
@@ -309,6 +309,26 @@ export interface OutboxEventsTable {
   last_error: string | null
 }
 
+
+export interface AgentTurnsTable {
+  id: string
+  organization_id: string
+  sender: string
+  idempotency_key: string
+  user_text: string
+  explicit_event_id: string | null
+  assistant_text: string | null
+  status: import('@ecc/domain').AgentTurnStatus
+  provider: import('@ecc/domain').OperationalAgentProviderKind
+  model: string
+  model_calls: ColumnType<number, number | undefined, number>
+  tool_trace: JSONColumnType<import('@ecc/domain').AgentToolTraceEntry[], import('@ecc/domain').AgentToolTraceEntry[], import('@ecc/domain').AgentToolTraceEntry[]>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  last_error: string | null
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -324,6 +344,7 @@ export interface DatabaseSchema {
   messaging_webhook_events: MessagingWebhookEventsTable
   inbound_messages: InboundMessagesTable
   command_requests: CommandRequestsTable
+  agent_turns: AgentTurnsTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

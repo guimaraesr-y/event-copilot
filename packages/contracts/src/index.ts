@@ -8,3 +8,5 @@ export * from './domain-events.ts'
 export * from './messaging.ts'
 
 export * from './commands.ts'
+
+export * from './agent.ts'
