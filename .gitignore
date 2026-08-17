@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+.tenant.setup.env
 *.log
 coverage/
 dist/
