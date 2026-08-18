@@ -15,7 +15,8 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "validate:foundation": "python3 scripts/validate_foundation.py",
-    "validate:feature": "python3 scripts/validate_feature_082.py"
+    "validate:feature": "python3 scripts/validate_feature_082.py",
+    "chat:agent": "bun scripts/operational-agent-chat.ts --organization ${ORGANIZATION_ID}"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0",
