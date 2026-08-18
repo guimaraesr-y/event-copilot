@@ -16,3 +16,5 @@ export * from './operations.ts'
 export * from './command.ts'
 
 export * from './agent.ts'
+
+export * from './change.ts'

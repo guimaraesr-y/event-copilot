@@ -329,6 +329,39 @@ export interface AgentTurnsTable {
   last_error: string | null
 }
 
+
+export interface ChangeProposalsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  requested_by_sender: string
+  decided_by_sender: string | null
+  source_agent_turn_id: string | null
+  idempotency_key: string
+  type: import('@ecc/domain').ChangeProposalType
+  current_value: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  proposed_value: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  reason: string | null
+  status: import('@ecc/domain').ChangeProposalStatus
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  decided_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  applied_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+}
+
+export interface ChangeProposalImpactsTable {
+  id: string
+  organization_id: string
+  proposal_id: string
+  event_id: string
+  category: import('@ecc/domain').ChangeImpactCategory
+  severity: import('@ecc/domain').ChangeImpactSeverity
+  title: string
+  description: string
+  metadata: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  created_at: ColumnType<Date, Date | string, never>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -345,6 +378,8 @@ export interface DatabaseSchema {
   inbound_messages: InboundMessagesTable
   command_requests: CommandRequestsTable
   agent_turns: AgentTurnsTable
+  change_proposals: ChangeProposalsTable
+  change_proposal_impacts: ChangeProposalImpactsTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

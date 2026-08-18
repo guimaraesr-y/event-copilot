@@ -1,6 +1,6 @@
 import { EventValidationError } from '@ecc/domain'
 
-interface LocalDateTimeParts {
+export interface LocalDateTimeParts {
   year: number
   month: number
   day: number
@@ -50,7 +50,7 @@ export function scheduleRelativeToReference(
   )
 }
 
-function assertTimeZone(timeZone: string): void {
+export function assertTimeZone(timeZone: string): void {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date())
   } catch {
@@ -58,7 +58,7 @@ function assertTimeZone(timeZone: string): void {
   }
 }
 
-function partsInTimeZone(date: Date, timeZone: string): LocalDateTimeParts {
+export function partsInTimeZone(date: Date, timeZone: string): LocalDateTimeParts {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
@@ -86,7 +86,7 @@ function partsInTimeZone(date: Date, timeZone: string): LocalDateTimeParts {
   }
 }
 
-function localDateTimeToUtc(target: LocalDateTimeParts, timeZone: string): Date {
+export function localDateTimeToUtc(target: LocalDateTimeParts, timeZone: string): Date {
   const targetAsUtc = Date.UTC(
     target.year,
     target.month - 1,

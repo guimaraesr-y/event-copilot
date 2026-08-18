@@ -55,6 +55,7 @@ export type InboxDraft = Omit<InboxItem, 'id' | 'organizationId' | 'sourceEventI
 export interface OperationalProjection {
   activity: ActivityDraft | null
   inbox: InboxDraft | null
+  resolveInbox?: { sourceType: string; sourceId: string; status: 'resolved' | 'dismissed' } | null
 }
 
 export interface OperationalProjectionStore {

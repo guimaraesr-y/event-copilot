@@ -4,6 +4,7 @@ import type {
   AgentTurn,
   AgentTurnStore,
   CommandInterpretation,
+  ChangeProposalWithImpacts,
   Event,
   InboxItem,
 } from '@ecc/domain'
@@ -15,6 +16,7 @@ import {
 import type { EventEngine } from './event-engine.ts'
 import type { VendorEngine } from './vendor-engine.ts'
 import type { CommandEngine } from './command-engine.ts'
+import type { ChangeProposalEngine } from './change-proposal-engine.ts'
 import type {
   AgentProviderMessage,
   AgentToolCall,
@@ -33,6 +35,7 @@ export interface OperationalAgentDependencies {
   eventEngine: EventEngine
   vendorEngine: VendorEngine
   commandEngine: CommandEngine
+  changeProposalEngine: ChangeProposalEngine
   operations: OperationalAgentOperationsReader
   now?: () => Date
   newId?: () => string
@@ -114,10 +117,48 @@ const TOOLS: AgentToolDefinition[] = [
       eventId: stringSchema('Exact event UUID from the event catalog.'),
       note: stringSchema('Useful information to persist, without invented details.'),
     }, ['eventId','note']),
+  },  {
+    name: 'get_change_proposals',
+    description: 'List change proposals. Use to inspect pending/applied/rejected sensitive changes, especially before approving a short follow-up such as sim/aprova.',
+    parameters: objectSchema({
+      eventId: nullableStringSchema('Optional exact event UUID.'),
+      status: { type: ['string','null'], enum: ['proposed','applied','rejected','cancelled',null] },
+      limit: { type: 'integer', minimum: 1, maximum: 20 },
+    }),
+  },
+  {
+    name: 'propose_event_date_change',
+    description: 'Create a proposal to change the event date. This does NOT apply the change. Only call when the user explicitly asks to change the date. date must be YYYY-MM-DD.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), date: stringSchema('New local date in YYYY-MM-DD.'), reason: nullableStringSchema('Optional user reason.') }, ['eventId','date']),
+  },
+  {
+    name: 'propose_event_time_change',
+    description: 'Create a proposal to change the event start time. This does NOT apply the change. Only call when the user explicitly asks to change the time. time must be HH:mm in organization timezone.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), time: stringSchema('New local time in HH:mm.'), reason: nullableStringSchema('Optional user reason.') }, ['eventId','time']),
+  },
+  {
+    name: 'propose_guest_count_change',
+    description: 'Create a proposal to change guest count. This does NOT apply the change. Only call on an explicit user request.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), guestCount: { type: 'integer', minimum: 0, maximum: 100000 }, reason: nullableStringSchema('Optional user reason.') }, ['eventId','guestCount']),
+  },
+  {
+    name: 'propose_venue_change',
+    description: 'Create a proposal to change venue/location. This does NOT apply the change. Only call on an explicit user request.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), venueName: nullableStringSchema('New venue name.'), venueAddress: nullableStringSchema('New venue address.'), reason: nullableStringSchema('Optional user reason.') }, ['eventId']),
+  },
+  {
+    name: 'approve_change_proposal',
+    description: 'Approve and atomically apply one existing proposed change. ONLY call when the CURRENT user message explicitly approves/confirms it. Never infer approval from previous context.',
+    parameters: objectSchema({ proposalId: stringSchema('Exact proposal UUID from pending proposal context/tool result.') }, ['proposalId']),
+  },
+  {
+    name: 'reject_change_proposal',
+    description: 'Reject one existing proposed change. ONLY call when the CURRENT user message explicitly rejects/cancels that proposal.',
+    parameters: objectSchema({ proposalId: stringSchema('Exact proposal UUID.'), reason: nullableStringSchema('Optional rejection reason.') }, ['proposalId']),
   },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -185,10 +226,11 @@ export class OperationalAgent {
       const conversation = await this.deps.commandEngine.getContext(input.organizationId, sender)
       const currentEvent = conversation?.currentEventId ? events.find((event) => event.id === conversation.currentEventId) ?? null : null
       const history = this.historyTurns > 0 ? await this.deps.store.listRecentTurns(input.organizationId, sender, this.historyTurns) : []
+      const pendingProposals = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, status: 'proposed', requestedBySender: sender, limit: 10 })
 
       const messages: AgentProviderMessage[] = [
         { role: 'system', content: buildSystemPrompt(input.organizationTimezone, startedAt) },
-        { role: 'system', content: buildRuntimeContext(events, currentEvent) },
+        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals) },
         ...history.flatMap((turn): AgentProviderMessage[] => turn.assistantText ? [
           { role: 'user', content: turn.userText },
           { role: 'assistant', content: turn.assistantText },
@@ -347,9 +389,81 @@ export class OperationalAgent {
         const note = requiredString(call.arguments, 'note')
         return this.executeStructuredToolCommand(input, turnId, toolIndex, event, 'ADD_EVENT_NOTE', { note })
       }
+      case 'get_change_proposals': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','status','limit'])
+        const eventId = optionalNullableString(call.arguments, 'eventId')
+        if (eventId) requireEvent(events, eventId)
+        const status = optionalEnum(call.arguments, 'status', ['proposed','applied','rejected','cancelled'] as const)
+        const limit = optionalInteger(call.arguments, 'limit', 10, 1, 20)
+        const proposals = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, requestedBySender: input.sender, ...(eventId ? { eventId } : {}), ...(status ? { status } : {}), limit })
+        return { proposals: proposals.map(serializeProposalForAgent), count: proposals.length }
+      }
+      case 'propose_event_date_change': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','date','reason'])
+        const event = requireEvent(events, requiredString(call.arguments, 'eventId'))
+        return this.proposeChange(input, turnId, toolIndex, event, 'event_date', { date: requiredString(call.arguments, 'date') }, optionalNullableString(call.arguments, 'reason'))
+      }
+      case 'propose_event_time_change': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','time','reason'])
+        const event = requireEvent(events, requiredString(call.arguments, 'eventId'))
+        return this.proposeChange(input, turnId, toolIndex, event, 'event_time', { time: requiredString(call.arguments, 'time') }, optionalNullableString(call.arguments, 'reason'))
+      }
+      case 'propose_guest_count_change': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','guestCount','reason'])
+        const event = requireEvent(events, requiredString(call.arguments, 'eventId'))
+        const guestCount = requiredInteger(call.arguments, 'guestCount', 0, 100000)
+        return this.proposeChange(input, turnId, toolIndex, event, 'guest_count', { guestCount }, optionalNullableString(call.arguments, 'reason'))
+      }
+      case 'propose_venue_change': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','venueName','venueAddress','reason'])
+        const event = requireEvent(events, requiredString(call.arguments, 'eventId'))
+        const venueName = optionalNullableString(call.arguments, 'venueName')
+        const venueAddress = optionalNullableString(call.arguments, 'venueAddress')
+        if (!venueName && !venueAddress) throw new OperationalAgentValidationError('Venue proposal requires venueName or venueAddress')
+        const proposedValue: Record<string, unknown> = {}
+        if (venueName) proposedValue.venueName = venueName
+        if (venueAddress) proposedValue.venueAddress = venueAddress
+        return this.proposeChange(input, turnId, toolIndex, event, 'venue', proposedValue, optionalNullableString(call.arguments, 'reason'))
+      }
+      case 'approve_change_proposal': {
+        assertNoUnexpectedKeys(call.arguments, ['proposalId'])
+        if (!isExplicitApproval(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly approve a change proposal')
+        const proposalId = requiredString(call.arguments, 'proposalId')
+        const current = await this.deps.changeProposalEngine.get(input.organizationId, proposalId)
+        requireEvent(events, current.proposal.eventId)
+        if (current.proposal.requestedBySender !== input.sender) throw new OperationalAgentValidationError('Agent can only approve proposals requested by the same conversation sender')
+        if (isGenericApproval(input.text)) {
+          const pending = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, status: 'proposed', requestedBySender: input.sender, limit: 20 })
+          if (pending.length !== 1 || pending[0]?.proposal.id !== proposalId) throw new OperationalAgentValidationError('Generic approval is ambiguous; ask the user which pending proposal to approve')
+        }
+        const result = await this.deps.changeProposalEngine.approve({ organizationId: input.organizationId, organizationTimezone: input.organizationTimezone, proposalId, decidedBySender: input.sender })
+        return { reply: result.reply, duplicate: result.duplicate, proposal: serializeProposalForAgent(result) }
+      }
+      case 'reject_change_proposal': {
+        assertNoUnexpectedKeys(call.arguments, ['proposalId','reason'])
+        if (!isExplicitRejection(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly reject a change proposal')
+        const proposalId = requiredString(call.arguments, 'proposalId')
+        const current = await this.deps.changeProposalEngine.get(input.organizationId, proposalId)
+        requireEvent(events, current.proposal.eventId)
+        if (current.proposal.requestedBySender !== input.sender) throw new OperationalAgentValidationError('Agent can only reject proposals requested by the same conversation sender')
+        const result = await this.deps.changeProposalEngine.reject({ organizationId: input.organizationId, proposalId, decidedBySender: input.sender, reason: optionalNullableString(call.arguments, 'reason') })
+        return { reply: result.reply, duplicate: result.duplicate, proposal: serializeProposalForAgent(result) }
+      }
       default:
         throw new OperationalAgentValidationError(`Unknown operational agent tool: ${call.name}`)
     }
+  }
+
+  private async proposeChange(
+    input: OperationalAgentInput, turnId: string, toolIndex: number, event: Event,
+    type: 'event_date' | 'event_time' | 'guest_count' | 'venue', proposedValue: Record<string, unknown>, reason: string | null,
+  ): Promise<Record<string, unknown>> {
+    const result = await this.deps.changeProposalEngine.create({
+      organizationId: input.organizationId, organizationTimezone: input.organizationTimezone, eventId: event.id,
+      requestedBySender: input.sender, sourceAgentTurnId: turnId, idempotencyKey: `agent:${turnId}:${toolIndex}:${type}`,
+      type, proposedValue, reason,
+    })
+    return { reply: result.reply, duplicate: result.duplicate, proposal: serializeProposalForAgent(result) }
   }
 
   private async executeStructuredToolCommand(
@@ -394,6 +508,7 @@ export class OperationalAgent {
 }
 
 function commandToolReply(result: Record<string, unknown>): string | null {
+  if (typeof result.reply === 'string' && result.reply.trim()) return result.reply.trim()
   const nested = result.result
   if (!nested || typeof nested !== 'object' || Array.isArray(nested)) return null
   const reply = (nested as Record<string, unknown>).reply
@@ -402,12 +517,13 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
-  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. As únicas escritas permitidas são select_event, create_task, complete_task e add_event_note. Elas passam pelo CommandEngine e regras de domínio.\n6. Alterar data, horário, quantidade de convidados, local/endereço do evento é sensível. NÃO existe ferramenta para isso nesta versão. Explique que exige Change Proposal e não afirme que alterou.\n7. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa), faça uma pergunta curta em vez de adivinhar.\n8. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n9. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n10. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n11. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.`
+  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.`
 }
 
-function buildRuntimeContext(events: Event[], current: Event | null): string {
+function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[]): string {
   const catalog = events.slice(0, 50).map((event) => ({ id: event.id, name: event.name, type: event.type, startAt: event.startAt.toISOString(), status: event.status }))
-  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas.`
+  const proposals = pendingProposals.slice(0, 10).map((value) => ({ id: value.proposal.id, eventId: value.proposal.eventId, type: value.proposal.type, currentValue: value.proposal.currentValue, proposedValue: value.proposal.proposedValue, createdAt: value.proposal.createdAt.toISOString() }))
+  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal IDs são internos e servem apenas para tools.`
 }
 
 function requireEvent(events: Event[], eventId: string): Event {
@@ -454,6 +570,28 @@ function serializeEvent(event: Event) {
 }
 function serializeInbox(item: InboxItem) {
   return { id: item.id, eventId: item.eventId, type: item.type, severity: item.severity, title: item.title, description: item.description, status: item.status, createdAt: item.createdAt.toISOString(), metadata: item.metadata }
+}
+function requiredInteger(args: Record<string, unknown>, key: string, min: number, max: number): number {
+  const value = args[key]
+  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) throw new OperationalAgentValidationError(`Tool argument ${key} must be an integer between ${min} and ${max}`)
+  return value as number
+}
+function serializeProposalForAgent(value: ChangeProposalWithImpacts) {
+  return { id: value.proposal.id, eventId: value.proposal.eventId, type: value.proposal.type, status: value.proposal.status, currentValue: value.proposal.currentValue, proposedValue: value.proposal.proposedValue, impacts: value.impacts.map((impact) => ({ category: impact.category, severity: impact.severity, title: impact.title, description: impact.description })), createdAt: value.proposal.createdAt.toISOString() }
+}
+function normalizeDecisionText(value: string): string { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() }
+function isGenericApproval(text: string): boolean {
+  const n = normalizeDecisionText(text).replace(/[!.]+$/g,'').trim()
+  return ['sim','pode','aprova','aprovado','confirmo','pode aplicar'].includes(n)
+}
+function isExplicitApproval(text: string): boolean {
+  const n = normalizeDecisionText(text)
+  if (/\b(nao|rejeita|rejeitado|cancela|cancelar)\b/.test(n)) return false
+  return /^(sim[!.]?|pode[!.]?|sim[,!. ]+pode|aprova|aprovado|confirmo|pode aplicar|pode mudar|pode fazer|faz a mudanca|aplique|aplicar)$/.test(n) || /\b(aprova|aprovado|confirmo|pode aplicar|pode mudar|pode fazer|aplique)\b/.test(n)
+}
+function isExplicitRejection(text: string): boolean {
+  const n = normalizeDecisionText(text)
+  return /^(nao|nao aprova|rejeita|rejeitado|cancela|cancelar|deixa como esta)$/.test(n) || /\b(rejeita|rejeitado|cancela|cancelar|nao aprova|deixa como esta)\b/.test(n)
 }
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }

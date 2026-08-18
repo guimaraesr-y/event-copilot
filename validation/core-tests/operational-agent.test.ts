@@ -1,8 +1,9 @@
 import type {
-  AgentTurn, AgentTurnStore, CommandRequest, CommandStore, ConversationContext, CreateAgentTurnInput, CreateCommandRequestInput,
-  DomainEvent, Event, EventMilestone, EventNote, EventStore, EventTask, EventTemplateSnapshot, EventVendor, UpdateAgentTurnInput,
+  AgentTurn, AgentTurnStore, ChangeProposal, ChangeProposalImpact, ChangeProposalStore, ChangeProposalWithImpacts, CommandRequest, CommandStore, ConversationContext, CreateAgentTurnInput, CreateCommandRequestInput,
+  DomainEvent, Event, EventMilestone, EventNote, EventStore, EventTask, EventTemplateSnapshot, EventVendor, ListChangeProposalsInput, UpdateAgentTurnInput,
   UpdateCommandRequestInput, Vendor, VendorStore,
 } from '../../packages/domain/src/index.ts'
+import { ChangeProposalEngine } from '../../packages/event-engine/src/change-proposal-engine.ts'
 import { CommandEngine } from '../../packages/event-engine/src/command-engine.ts'
 import { RuleBasedCommandInterpreter } from '../../packages/event-engine/src/command-interpreter.ts'
 import { EventEngine } from '../../packages/event-engine/src/event-engine.ts'
@@ -65,6 +66,17 @@ class AStore implements AgentTurnStore {
   async listRecentTurns(o:string,s:string,limit:number){return [...this.turns.values()].filter(t=>t.organizationId===o&&t.sender===s&&t.status==='completed').sort((a,b)=>a.createdAt.getTime()-b.createdAt.getTime()).slice(-limit)}
 }
 
+class CPStore implements ChangeProposalStore {
+  values=new Map<string,ChangeProposalWithImpacts>()
+  constructor(private readonly es:EStore){}
+  async findById(o:string,id:string){const v=this.values.get(id);return v?.proposal.organizationId===o?v:null}
+  async findByIdempotencyKey(o:string,key:string){return [...this.values.values()].find(v=>v.proposal.organizationId===o&&v.proposal.idempotencyKey===key)??null}
+  async list(input:ListChangeProposalsInput){return [...this.values.values()].filter(v=>v.proposal.organizationId===input.organizationId&&(!input.eventId||v.proposal.eventId===input.eventId)&&(!input.status||v.proposal.status===input.status)&&(!input.requestedBySender||v.proposal.requestedBySender===input.requestedBySender)).slice(0,input.limit??50)}
+  async createWithOutbox(p:ChangeProposal,i:ChangeProposalImpact[],_e:DomainEvent){const old=await this.findByIdempotencyKey(p.organizationId,p.idempotencyKey);if(old)return{value:old,created:false};const v={proposal:p,impacts:i};this.values.set(p.id,v);return{value:v,created:true}}
+  async applyWithOutbox(p:ChangeProposal,e:Event,_d:DomainEvent[]){const current=this.values.get(p.id);if(!current||current.proposal.status!=='proposed')return{value:current??{proposal:p,impacts:[]},applied:false};this.values.set(p.id,{proposal:p,impacts:current.impacts});const idx=this.es.events.findIndex(x=>x.id===e.id);if(idx>=0)this.es.events[idx]=e;return{value:this.values.get(p.id)!,applied:true}}
+  async rejectWithOutbox(p:ChangeProposal,_e:DomainEvent){const current=this.values.get(p.id);if(!current||current.proposal.status!=='proposed')return{value:current??{proposal:p,impacts:[]},rejected:false};this.values.set(p.id,{proposal:p,impacts:current.impacts});return{value:this.values.get(p.id)!,rejected:true}}
+}
+
 class ScriptedProvider implements OperationalAgentProvider {
   readonly kind='ollama' as const; readonly model='fake-agent'; calls=0; sawHistory=false
   async complete(input:{messages:AgentProviderMessage[];tools:AgentToolDefinition[]}):Promise<AgentProviderResponse>{
@@ -76,7 +88,9 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('meus eventos')) return tool('get_workspace_overview',{})
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
-    if(user.includes('horário')) return {message:{role:'assistant',content:'Essa mudança de horário exige uma Change Proposal e não foi aplicada.'},toolCalls:[]}
+    if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
+    if(user==='NÃO APROVE'){const system=input.messages.find(m=>m.role==='system'&&m.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content??'';const section=system.split('PROPOSTAS DE MUDANÇA PENDENTES')[1]??'';const proposalId=section.match(/\"id\":\"([0-9a-f-]{36})\"/i)?.[1];if(proposalId)return tool('approve_change_proposal',{proposalId})}
+    if(user.trim().toLowerCase()==='sim'){const system=input.messages.find(m=>m.role==='system'&&m.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content??'';const section=system.split('PROPOSTAS DE MUDANÇA PENDENTES')[1]??'';const proposalId=section.match(/\"id\":\"([0-9a-f-]{36})\"/i)?.[1];if(proposalId)return tool('approve_change_proposal',{proposalId})}
     return tool('get_event_details',{eventId:ANA})
   }
 }
@@ -86,8 +100,10 @@ const es=new EStore();const vs=new VStore(es);const cs=new CStore();const as=new
 const eventEngine=new EventEngine({store:es,now,newId:()=>`event-generated-${++seq}`})
 const vendorEngine=new VendorEngine({store:vs,now,newId:()=>`vendor-generated-${++seq}`})
 const commandEngine=new CommandEngine({store:cs,eventEngine,vendorEngine,interpreter:new RuleBasedCommandInterpreter(),now,newId:()=>`command-${++seq}`})
+const cpStore=new CPStore(es)
+const changeProposalEngine=new ChangeProposalEngine({store:cpStore,eventEngine,vendorEngine,now,newId:()=>`33333333-3333-4333-8333-${String(++seq).padStart(12,'0')}`})
 const provider=new ScriptedProvider()
-const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
+const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
 {
@@ -120,8 +136,23 @@ let createdTurnId=''
 {
   const before=es.events[0]!.startAt.toISOString();const taskCount=es.tasks.length
   const r=await agent.chat({...base,explicitEventId:ANA,text:'Mude o horário do casamento para 17h',idempotencyKey:'agent-sensitive'})
-  assert(r.reply.includes('Change Proposal'),'agent refuses sensitive write without a tool')
-  assert(es.events[0]!.startAt.toISOString()===before&&es.tasks.length===taskCount,'sensitive conversational request cannot mutate domain')
+  assert(r.turn.toolTrace[0]?.name==='propose_event_time_change','sensitive write creates a proposal')
+  assert(es.events[0]!.startAt.toISOString()===before&&es.tasks.length===taskCount,'proposal does not mutate event before approval')
+  const pending=[...cpStore.values.values()].find(v=>v.proposal.status==='proposed')
+  assert(pending?.proposal.proposedValue.time==='17:00','proposal stores normalized target time')
+  let blocked=false
+  try{await agent.chat({...base,text:'NÃO APROVE',idempotencyKey:'agent-sensitive-malicious-approve'})}catch(error){blocked=typeof error==='object'&&error!==null&&'code'in error&&(error as {code?:unknown}).code==='OPERATIONAL_AGENT_VALIDATION_ERROR'}
+  assert(blocked&&pending?.proposal.status==='proposed','server blocks approval tool when current user text rejects approval')
+  const approved=await agent.chat({...base,text:'sim',idempotencyKey:'agent-sensitive-approve'})
+  assert(approved.turn.toolTrace[0]?.name==='approve_change_proposal','explicit follow-up approves pending proposal')
+  assert(es.events[0]!.startAt.toISOString()!==before,'approved proposal mutates event')
+}
+{
+  await changeProposalEngine.create({organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',eventId:ANA,requestedBySender:'planner',idempotencyKey:'ambiguous-guest',type:'guest_count',proposedValue:{guestCount:140}})
+  await changeProposalEngine.create({organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',eventId:ANA,requestedBySender:'planner',idempotencyKey:'ambiguous-venue',type:'venue',proposedValue:{venueName:'Casa B'}})
+  let ambiguous=false
+  try{await agent.chat({...base,text:'sim',idempotencyKey:'agent-ambiguous-approve'})}catch(error){ambiguous=typeof error==='object'&&error!==null&&'code'in error&&(error as {code?:unknown}).code==='OPERATIONAL_AGENT_VALIDATION_ERROR'}
+  assert(ambiguous,'generic approval is blocked when more than one proposal is pending')
 }
 {
   const {turn}=await as.createTurnIfAbsent({id:'stuck-turn',organizationId:'org-1',sender:'planner',idempotencyKey:'stuck-key',userText:'Como estão meus eventos?',provider:'ollama',model:'fake',now:fixedNow})
@@ -131,4 +162,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 6/6 behavioral scenarios passed')
+console.log('OperationalAgent: 9/9 behavioral scenarios passed')

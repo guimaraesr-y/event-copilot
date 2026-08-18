@@ -378,6 +378,19 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       }
       return toolResponse('create_task', { eventId, title: 'Confirmar buffet', dueAt })
     }
+    if (normalized.includes('mude o horario') || normalized.includes('mudar o horario')) {
+      const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
+      const match = normalized.match(/(?:para|pras?|as)\s+(\d{1,2})(?::(\d{2}))?h?/)
+      if (eventId && match) return toolResponse('propose_event_time_change', { eventId, time: `${String(Number(match[1])).padStart(2,'0')}:${match[2] ?? '00'}` })
+    }
+    if (/^(sim|aprova|pode aplicar)$/.test(normalized)) {
+      const proposalId = firstPendingProposalId(input.messages)
+      if (proposalId) return toolResponse('approve_change_proposal', { proposalId })
+    }
+    if (/^(nao|rejeita|cancela)$/.test(normalized)) {
+      const proposalId = firstPendingProposalId(input.messages)
+      if (proposalId) return toolResponse('reject_change_proposal', { proposalId })
+    }
     return toolResponse('get_workspace_overview', {})
   }
 }
@@ -389,6 +402,11 @@ function toolResponse(name: string, args: Record<string, unknown>): AgentProvide
 function currentEventId(messages: AgentProviderMessage[]): string | null {
   const context = messages.find((message) => message.role === 'system' && message.content.includes('EVENTO ATUAL DA CONVERSA'))?.content ?? ''
   const section = context.split('EVENTO ATUAL DA CONVERSA')[1] ?? ''
+  return section.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0] ?? null
+}
+function firstPendingProposalId(messages: AgentProviderMessage[]): string | null {
+  const context = messages.find((message) => message.role === 'system' && message.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content ?? ''
+  const section = context.split('PROPOSTAS DE MUDANÇA PENDENTES')[1] ?? ''
   return section.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0] ?? null
 }
 function firstEventId(messages: AgentProviderMessage[]): string | null {

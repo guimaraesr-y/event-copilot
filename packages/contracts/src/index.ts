@@ -10,3 +10,5 @@ export * from './messaging.ts'
 export * from './commands.ts'
 
 export * from './agent.ts'
+
+export * from './change-proposals.ts'

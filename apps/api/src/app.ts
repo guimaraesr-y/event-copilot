@@ -11,10 +11,11 @@ import {
   OperationalRepository,
   KyselyCommandStore,
   KyselyAgentStore,
+  KyselyChangeProposalStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent, ChangeProposalEngine } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
@@ -29,6 +30,7 @@ import { registerCommandRoutes } from './routes/commands.ts'
 import { createCommandInterpreter } from './command-interpreter.ts'
 import { createOperationalAgentProvider, operationalAgentLimits } from './operational-agent.ts'
 import { registerOperationalAgentRoutes } from './routes/agent.ts'
+import { registerChangeProposalRoutes } from './routes/change-proposals.ts'
 import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
@@ -42,12 +44,14 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const operationalRepository = new OperationalRepository(db)
   const commandStore = new KyselyCommandStore(db)
   const commandEngine = new CommandEngine({ store: commandStore, eventEngine, vendorEngine, interpreter: createCommandInterpreter() })
+  const changeProposalEngine = new ChangeProposalEngine({ store: new KyselyChangeProposalStore(db), eventEngine, vendorEngine })
   const operationalAgent = new OperationalAgent({
     store: new KyselyAgentStore(db),
     provider: createOperationalAgentProvider(),
     eventEngine,
     vendorEngine,
     commandEngine,
+    changeProposalEngine,
     operations: operationalRepository,
     ...operationalAgentLimits(),
   })
@@ -74,6 +78,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerOperationalRoutes(app, organizationRepository, operationalRepository)
   registerCommandRoutes(app, organizationRepository, commandEngine)
   registerOperationalAgentRoutes(app, organizationRepository, operationalAgent)
+  registerChangeProposalRoutes(app, organizationRepository, changeProposalEngine)
 
   return app
 }

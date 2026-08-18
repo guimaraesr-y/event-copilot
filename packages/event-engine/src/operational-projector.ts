@@ -87,6 +87,29 @@ export class OperationalProjector {
           inbox: null,
         }
       }
+      case 'change.proposed': {
+        const type = text(p.changeType) ?? 'alteração sensível'
+        return {
+          activity: activity(eventId, 'user', 'change', 'change.proposed', 'change_proposal', message.aggregateId, 'Proposta de mudança criada', `Tipo: ${type}`, p),
+          inbox: inbox(eventId, 'change_proposal_approval', impactSeverity(p.impacts), 'change_proposal', message.aggregateId, 'Mudança aguardando aprovação', `Existe uma proposta de ${type} aguardando decisão.`, p),
+        }
+      }
+      case 'change.applied': {
+        const type = text(p.changeType) ?? 'alteração sensível'
+        return {
+          activity: activity(eventId, 'user', 'change', 'change.applied', 'change_proposal', message.aggregateId, 'Mudança aprovada e aplicada', `Tipo: ${type}`, p),
+          inbox: null,
+          resolveInbox: { sourceType: 'change_proposal', sourceId: message.aggregateId, status: 'resolved' },
+        }
+      }
+      case 'change.rejected': {
+        const type = text(p.changeType) ?? 'alteração sensível'
+        return {
+          activity: activity(eventId, 'user', 'change', 'change.rejected', 'change_proposal', message.aggregateId, 'Proposta de mudança rejeitada', `Tipo: ${type}`, p),
+          inbox: null,
+          resolveInbox: { sourceType: 'change_proposal', sourceId: message.aggregateId, status: 'dismissed' },
+        }
+      }
       default:
         return { activity: null, inbox: null }
     }
@@ -120,6 +143,13 @@ function inbox(
   return { eventId, type, severity, sourceType, sourceId, title, description, assignedTo: null, metadata }
 }
 
+function impactSeverity(value: unknown): 'info' | 'warning' | 'critical' {
+  if (!Array.isArray(value)) return 'warning'
+  const levels = value.map((item) => item && typeof item === 'object' ? (item as Record<string, unknown>).severity : null)
+  if (levels.includes('critical')) return 'critical'
+  if (levels.includes('warning')) return 'warning'
+  return 'info'
+}
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }

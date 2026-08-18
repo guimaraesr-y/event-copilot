@@ -6,7 +6,7 @@ export class OperationalRepository {
   constructor(private readonly db: Kysely<DatabaseSchema>) {}
 
   async applyProjection(message: OutboxMessage, projection: OperationalProjection, at = new Date()): Promise<void> {
-    if (!projection.activity && !projection.inbox) return
+    if (!projection.activity && !projection.inbox && !projection.resolveInbox) return
     await this.db.transaction().execute(async (trx) => {
       if (projection.activity) {
         const a = projection.activity
@@ -25,6 +25,16 @@ export class OperationalRepository {
           source_id: i.sourceId, title: i.title, description: i.description, status: 'open',
           assigned_to: i.assignedTo, metadata: i.metadata, created_at: at, updated_at: at, resolved_at: null,
         }).onConflict((oc) => oc.columns(['source_event_id','type']).doNothing()).execute()
+      }
+      if (projection.resolveInbox) {
+        const resolution = projection.resolveInbox
+        await trx.updateTable('inbox_items').set({
+          status: resolution.status, updated_at: at, resolved_at: at,
+        }).where('organization_id', '=', message.organizationId)
+          .where('source_type', '=', resolution.sourceType)
+          .where('source_id', '=', resolution.sourceId)
+          .where('status', 'in', ['open','in_progress'])
+          .execute()
       }
     })
   }
