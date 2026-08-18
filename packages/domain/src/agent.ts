@@ -1,6 +1,6 @@
 export const AGENT_TURN_STATUSES = ['received','processing','completed','failed'] as const
 export type AgentTurnStatus = (typeof AGENT_TURN_STATUSES)[number]
-export type OperationalAgentProviderKind = 'ollama' | 'openai' | 'gemini' | 'deterministic'
+export type OperationalAgentProviderKind = 'ollama' | 'openrouter' | 'openai' | 'gemini' | 'deterministic'
 
 export interface AgentToolTraceEntry {
   index: number

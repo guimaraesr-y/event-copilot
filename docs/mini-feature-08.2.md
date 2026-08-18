@@ -196,3 +196,7 @@ x-organization-id: <uuid>
 - long-term semantic memory/RAG.
 
 The endpoint is channel-neutral, so WhatsApp/web/mobile can later reuse the same Agent without moving business rules into n8n.
+
+## OpenRouter provider
+
+O Operational Agent também suporta `OPERATIONAL_AGENT_PROVIDER=openrouter` via API Chat Completions compatível com OpenAI. Veja `docs/openrouter-operational-agent.md`.

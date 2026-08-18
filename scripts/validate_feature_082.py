@@ -16,6 +16,8 @@ for n in ['011_operational_agent','migration011OperationalAgent']:
   if n not in text('packages/database/src/migrate.ts'): fail(f'migrate missing {n}')
 for n in ['012_operational_agent_tool_trace_jsonb','migration012OperationalAgentToolTraceJsonb']:
   if n not in text('packages/database/src/migrate.ts'): fail(f'migrate missing {n}')
+for n in ['013_operational_agent_openrouter','migration013OperationalAgentOpenRouter']:
+  if n not in text('packages/database/src/migrate.ts'): fail(f'migrate missing {n}')
 for n in ['agent_turns_tool_trace_array_check',"jsonb_typeof(tool_trace) is distinct from 'array'"]:
   if n not in text('packages/database/src/migrations/012_operational_agent_tool_trace_jsonb.ts'): fail(f'migration 012 missing {n}')
 for n in ["createTable('agent_turns')",'agent_turns_org_idempotency_unique',"interpreter in ('rule_based','ai','agent')"]:
@@ -23,7 +25,7 @@ for n in ["createTable('agent_turns')",'agent_turns_org_idempotency_unique',"int
 for n in ['get_workspace_overview','get_event_details','get_event_activity','get_inbox','create_task','executeStructuredToolCommand','OPERATIONAL_AGENT']:
   source=text('packages/event-engine/src/operational-agent.ts')
   if n not in source and n!='OPERATIONAL_AGENT': fail(f'agent missing {n}')
-for n in ['OllamaOperationalAgentProvider','DeterministicOperationalAgentProvider','toolMode','ACTION_SCHEMA','/api/chat']:
+for n in ['OllamaOperationalAgentProvider','OpenRouterOperationalAgentProvider','DeterministicOperationalAgentProvider','toolMode','ACTION_SCHEMA','/api/chat','/chat/completions']:
   if n not in text('packages/event-engine/src/operational-agent-provider.ts'): fail(f'provider missing {n}')
 for n in ['/api/v1/agent/messages','/api/v1/agent/history']:
   if n not in text('apps/api/src/routes/agent.ts'): fail(f'agent route missing {n}')
@@ -35,6 +37,8 @@ for n in ['operational agent workspace overview','operational agent creates task
 if 'OPERATIONAL_AGENT_PROVIDER=deterministic' not in text('scripts/smoke-env.sh'): fail('smoke agent provider guard missing')
 if 'OLLAMA_AGENT_MODEL' not in text('scripts/ollama-setup.sh'): fail('ollama setup does not provision agent model')
 if 'operational-agent-chat.ts' not in text('docs/mini-feature-08.2.md'): fail('agent CLI docs missing')
+for n in ['OPERATIONAL_AGENT_PROVIDER=openrouter','OPENROUTER_API_KEY','OPENROUTER_AGENT_MODEL']:
+  if n not in text('docs/openrouter-operational-agent.md'): fail(f'OpenRouter docs missing {n}')
 
 for cfg in ['validation/tsconfig.full.json','validation/tsconfig.core.json','validation/tsconfig.messaging.json']:
   r=subprocess.run(['tsc','--noEmit','-p',str(ROOT/cfg)],cwd=ROOT,text=True,capture_output=True)

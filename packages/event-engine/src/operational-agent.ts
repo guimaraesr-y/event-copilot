@@ -199,7 +199,7 @@ export class OperationalAgent {
       let totalToolCalls = trace.length
       for (let loop = 0; loop < this.maxModelCalls; loop += 1) {
         modelCalls += 1
-        const response = await this.deps.provider.complete({ messages, tools: TOOLS })
+        const response = await this.deps.provider.complete({ messages, tools: TOOLS, sessionId: initial.id })
         messages.push(response.message)
 
         if (!response.toolCalls.length) {
@@ -225,7 +225,7 @@ export class OperationalAgent {
           const result = await this.executeTool(input, initial.id, totalToolCalls, events, call)
           trace.push({ index: totalToolCalls, name: call.name, arguments: call.arguments, result })
           batchResults.push({ call, result })
-          messages.push({ role: 'tool', toolName: call.name, content: JSON.stringify(result) })
+          messages.push({ role: 'tool', toolName: call.name, ...(call.id ? { toolCallId: call.id } : {}), content: JSON.stringify(result) })
         }
 
         // A successful write already returns a domain-owned human reply through CommandEngine.

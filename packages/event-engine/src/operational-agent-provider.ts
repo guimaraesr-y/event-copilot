@@ -16,6 +16,7 @@ export interface AgentProviderMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
   toolName?: string
+  toolCallId?: string
   toolCalls?: AgentToolCall[]
 }
 
@@ -30,7 +31,151 @@ export interface OperationalAgentProvider {
   complete(input: {
     messages: AgentProviderMessage[]
     tools: AgentToolDefinition[]
+    sessionId?: string
   }): Promise<AgentProviderResponse>
+}
+
+
+export type OpenRouterAgentToolMode = 'prompt' | 'native'
+
+export interface OpenRouterOperationalAgentProviderOptions {
+  apiKey?: string
+  model?: string
+  baseUrl?: string
+  timeoutMs?: number
+  toolMode?: OpenRouterAgentToolMode
+  httpReferer?: string
+  appTitle?: string
+  requireParameters?: boolean
+  dataCollection?: 'allow' | 'deny'
+  fetchImpl?: typeof fetch
+}
+
+export class OpenRouterOperationalAgentProvider implements OperationalAgentProvider {
+  readonly kind = 'openrouter' as const
+  readonly model: string
+  private readonly apiKey: string
+  private readonly baseUrl: string
+  private readonly timeoutMs: number
+  private readonly toolMode: OpenRouterAgentToolMode
+  private readonly httpReferer: string | null
+  private readonly appTitle: string | null
+  private readonly requireParameters: boolean
+  private readonly dataCollection: 'allow' | 'deny'
+  private readonly fetchImpl: typeof fetch
+
+  constructor(options: OpenRouterOperationalAgentProviderOptions = {}) {
+    this.apiKey = options.apiKey?.trim() || ''
+    this.model = options.model?.trim() || 'openrouter/auto'
+    this.baseUrl = (options.baseUrl?.trim() || 'https://openrouter.ai/api/v1').replace(/\/$/, '')
+    this.timeoutMs = options.timeoutMs ?? 60_000
+    this.toolMode = options.toolMode ?? 'native'
+    this.httpReferer = options.httpReferer?.trim() || null
+    this.appTitle = options.appTitle?.trim() || null
+    this.requireParameters = options.requireParameters ?? true
+    this.dataCollection = options.dataCollection ?? 'allow'
+    this.fetchImpl = options.fetchImpl ?? fetch
+  }
+
+  async complete(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
+    if (!this.apiKey) throw new OperationalAgentProviderError('OPENROUTER_API_KEY is required when OPERATIONAL_AGENT_PROVIDER=openrouter')
+    return this.toolMode === 'native' ? this.completeNative(input) : this.completePrompt(input)
+  }
+
+  private async completeNative(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
+    const response = await this.request({
+      model: this.model,
+      stream: false,
+      temperature: 0,
+      messages: input.messages.map(toOpenRouterMessage),
+      tools: input.tools.map((tool) => ({
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+      })),
+      tool_choice: 'auto',
+      provider: this.providerPreferences(),
+      ...(input.sessionId ? { session_id: input.sessionId } : {}),
+    })
+    const rawMessage = response?.choices?.[0]?.message
+    if (!rawMessage || typeof rawMessage !== 'object') throw new OperationalAgentProviderError('OpenRouter response did not contain choices[0].message')
+    const toolCalls = (Array.isArray(rawMessage.tool_calls) ? rawMessage.tool_calls : []).map((call: any): AgentToolCall => {
+      const id = typeof call?.id === 'string' && call.id.trim() ? call.id : null
+      if (!id) throw new OperationalAgentProviderError('OpenRouter native tool call did not contain an id')
+      return {
+        id,
+        name: requireToolName(call?.function?.name),
+        arguments: parseToolArguments(call?.function?.arguments),
+      }
+    })
+    const content = typeof rawMessage.content === 'string' ? rawMessage.content : ''
+    return {
+      message: { role: 'assistant', content, ...(toolCalls.length ? { toolCalls } : {}) },
+      toolCalls,
+    }
+  }
+
+  private async completePrompt(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
+    const messages = buildPromptProtocolMessages(input)
+    const response = await this.request({
+      model: this.model,
+      stream: false,
+      temperature: 0,
+      messages,
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'ecc_operational_agent_action', strict: true, schema: ACTION_SCHEMA },
+      },
+      provider: this.providerPreferences(),
+      ...(input.sessionId ? { session_id: input.sessionId } : {}),
+    })
+    const content = response?.choices?.[0]?.message?.content
+    if (typeof content !== 'string' || !content.trim()) throw new OperationalAgentProviderError('OpenRouter prompt-agent response did not contain message.content')
+    let action: any
+    try { action = JSON.parse(content) } catch { throw new OperationalAgentProviderError('OpenRouter prompt-agent response was not valid JSON') }
+    return parsePromptAction(action, input.tools, 'OpenRouter')
+  }
+
+  private providerPreferences(): Record<string, unknown> {
+    return { require_parameters: this.requireParameters, data_collection: this.dataCollection }
+  }
+
+  private async request(body: Record<string, unknown>): Promise<any> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.apiKey}`,
+      'content-type': 'application/json',
+    }
+    if (this.httpReferer) headers['HTTP-Referer'] = this.httpReferer
+    if (this.appTitle) headers['X-OpenRouter-Title'] = this.appTitle
+    let response: Response
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
+        method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(this.timeoutMs),
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new OperationalAgentProviderError(`OpenRouter request failed: ${reason}`)
+    }
+    if (!response.ok) {
+      const responseBody = await response.text()
+      throw new OperationalAgentProviderError(`OpenRouter API returned ${response.status}: ${responseBody.slice(0, 800)}`)
+    }
+    return response.json()
+  }
+}
+
+function toOpenRouterMessage(message: AgentProviderMessage): Record<string, unknown> {
+  if (message.role === 'tool') {
+    if (!message.toolCallId) throw new OperationalAgentProviderError('OpenRouter native tool result is missing toolCallId')
+    return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
+  }
+  const mapped: Record<string, unknown> = { role: message.role, content: message.content }
+  if (message.role === 'assistant' && message.toolCalls?.length) {
+    mapped.tool_calls = message.toolCalls.map((call) => {
+      if (!call.id) throw new OperationalAgentProviderError('OpenRouter assistant tool call is missing id')
+      return { id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments) } }
+    })
+  }
+  return mapped
 }
 
 export type OllamaAgentToolMode = 'prompt' | 'native'
@@ -74,11 +219,11 @@ export class OllamaOperationalAgentProvider implements OperationalAgentProvider 
     this.fetchImpl = options.fetchImpl ?? fetch
   }
 
-  async complete(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[] }): Promise<AgentProviderResponse> {
+  async complete(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
     return this.toolMode === 'native' ? this.completeNative(input) : this.completePrompt(input)
   }
 
-  private async completeNative(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[] }): Promise<AgentProviderResponse> {
+  private async completeNative(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
     const response = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -116,26 +261,8 @@ export class OllamaOperationalAgentProvider implements OperationalAgentProvider 
     return { message, toolCalls }
   }
 
-  private async completePrompt(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[] }): Promise<AgentProviderResponse> {
-    const toolCatalog = input.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
-    const systemAddon = [
-      'TOOL LOOP PROTOCOL:',
-      'You do not have native function calling in this mode. Choose exactly one next action.',
-      'To call a tool, return type="tool", toolName with an exact available tool name, arguments matching its schema, answer=null.',
-      'To answer the user, return type="final", toolName=null, arguments={}, answer with the final answer.',
-      'Never claim a tool succeeded before receiving its tool result.',
-      `Available tools: ${JSON.stringify(toolCatalog)}`,
-    ].join('\n')
-    const messages = input.messages.map((message) => {
-      if (message.role === 'tool') return { role: 'user', content: `[TOOL RESULT ${message.toolName ?? 'unknown'}]\n${message.content}` }
-      if (message.role === 'assistant' && message.toolCalls?.length) {
-        return { role: 'assistant', content: message.content || `[TOOL REQUEST]\n${JSON.stringify(message.toolCalls)}` }
-      }
-      return { role: message.role, content: message.content }
-    })
-    const firstSystem = messages.findIndex((message) => message.role === 'system')
-    if (firstSystem >= 0) messages[firstSystem] = { role: 'system', content: `${messages[firstSystem]!.content}\n\n${systemAddon}` }
-    else messages.unshift({ role: 'system', content: systemAddon })
+  private async completePrompt(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
+    const messages = buildPromptProtocolMessages(input)
 
     const response = await this.fetchImpl(`${this.baseUrl}/api/chat`, {
       method: 'POST',
@@ -160,21 +287,52 @@ export class OllamaOperationalAgentProvider implements OperationalAgentProvider 
     if (typeof content !== 'string' || !content.trim()) throw new OperationalAgentProviderError('Ollama prompt-agent response did not contain message.content')
     let action: any
     try { action = JSON.parse(content) } catch { throw new OperationalAgentProviderError('Ollama prompt-agent response was not valid JSON') }
-    if (action?.type === 'final') {
-      const answer = typeof action.answer === 'string' ? action.answer.trim() : ''
-      if (!answer) throw new OperationalAgentProviderError('Ollama prompt-agent final action did not contain an answer')
-      const message: AgentProviderMessage = { role: 'assistant', content: answer }
-      return { message, toolCalls: [] }
-    }
-    if (action?.type !== 'tool') throw new OperationalAgentProviderError('Ollama prompt-agent action type must be tool or final')
-    const name = requireToolName(action.toolName)
-    if (!input.tools.some((tool) => tool.name === name)) throw new OperationalAgentProviderError(`Ollama requested unknown tool: ${name}`)
-    const toolCall: AgentToolCall = { name, arguments: objectValue(action.arguments) }
-    return {
-      message: { role: 'assistant', content: '', toolCalls: [toolCall] },
-      toolCalls: [toolCall],
-    }
+    return parsePromptAction(action, input.tools, 'Ollama')
   }
+}
+
+
+function buildPromptProtocolMessages(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[] }): Array<{ role: string; content: string }> {
+  const toolCatalog = input.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
+  const systemAddon = [
+    'TOOL LOOP PROTOCOL:',
+    'You do not have native function calling in this mode. Choose exactly one next action.',
+    'To call a tool, return type="tool", toolName with an exact available tool name, arguments matching its schema, answer=null.',
+    'To answer the user, return type="final", toolName=null, arguments={}, answer with the final answer.',
+    'Never claim a tool succeeded before receiving its tool result.',
+    `Available tools: ${JSON.stringify(toolCatalog)}`,
+  ].join('\n')
+  const messages = input.messages.map((message) => {
+    if (message.role === 'tool') return { role: 'user', content: `[TOOL RESULT ${message.toolName ?? 'unknown'}]\n${message.content}` }
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      return { role: 'assistant', content: message.content || `[TOOL REQUEST]\n${JSON.stringify(message.toolCalls)}` }
+    }
+    return { role: message.role, content: message.content }
+  })
+  const firstSystem = messages.findIndex((message) => message.role === 'system')
+  if (firstSystem >= 0) messages[firstSystem] = { role: 'system', content: `${messages[firstSystem]!.content}\n\n${systemAddon}` }
+  else messages.unshift({ role: 'system', content: systemAddon })
+  return messages
+}
+
+function parsePromptAction(action: any, tools: AgentToolDefinition[], providerName: string): AgentProviderResponse {
+  if (action?.type === 'final') {
+    const answer = typeof action.answer === 'string' ? action.answer.trim() : ''
+    if (!answer) throw new OperationalAgentProviderError(`${providerName} prompt-agent final action did not contain an answer`)
+    return { message: { role: 'assistant', content: answer }, toolCalls: [] }
+  }
+  if (action?.type !== 'tool') throw new OperationalAgentProviderError(`${providerName} prompt-agent action type must be tool or final`)
+  const name = requireToolName(action.toolName)
+  if (!tools.some((tool) => tool.name === name)) throw new OperationalAgentProviderError(`${providerName} requested unknown tool: ${name}`)
+  const toolCall: AgentToolCall = { name, arguments: objectValue(action.arguments) }
+  return { message: { role: 'assistant', content: '', toolCalls: [toolCall] }, toolCalls: [toolCall] }
+}
+
+function parseToolArguments(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try { return objectValue(JSON.parse(value)) } catch { throw new OperationalAgentProviderError('Agent provider returned invalid JSON tool arguments') }
+  }
+  return objectValue(value)
 }
 
 function toOllamaMessage(message: AgentProviderMessage): Record<string, unknown> {
@@ -203,7 +361,7 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
   readonly kind = 'deterministic' as const
   readonly model = 'deterministic-smoke'
 
-  async complete(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[] }): Promise<AgentProviderResponse> {
+  async complete(input: { messages: AgentProviderMessage[]; tools: AgentToolDefinition[]; sessionId?: string }): Promise<AgentProviderResponse> {
     const last = input.messages[input.messages.length - 1]
     if (last?.role === 'tool') {
       const message: AgentProviderMessage = { role: 'assistant', content: `Operação concluída com ${last.toolName ?? 'ferramenta'}.` }
