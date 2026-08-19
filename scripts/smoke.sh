@@ -86,8 +86,13 @@ curl -fsS "$BASE_URL/api/health/ready" >/dev/null
 echo OK
 
 printf '2/50 install and publish n8n workflow... '
-./scripts/n8n-sync.sh >/dev/null
-echo OK
+if N8N_SYNC_OUTPUT=$(./scripts/n8n-sync.sh 2>&1); then
+  echo OK
+else
+  echo FAILED
+  printf '%s\n' "$N8N_SYNC_OUTPUT" >&2
+  exit 1
+fi
 
 printf '3/50 create organization... '
 ORG_JSON=$(curl -fsS -X POST "$BASE_URL/api/v1/organizations" -H 'content-type: application/json' -d '{"name":"Cerimonial Demo","timezone":"America/Sao_Paulo"}')
