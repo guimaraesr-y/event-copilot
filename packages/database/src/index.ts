@@ -21,3 +21,5 @@ export * from './repositories/kysely-agent-store.ts'
 export * from './repositories/kysely-change-proposal-store.ts'
 
 export * from './repositories/kysely-dependency-store.ts'
+
+export * from './repositories/kysely-risk-store.ts'

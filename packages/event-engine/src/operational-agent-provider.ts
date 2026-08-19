@@ -391,9 +391,18 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const proposalId = firstPendingProposalId(input.messages)
       if (proposalId) return toolResponse('reject_change_proposal', { proposalId })
     }
-    if (/recalcul|aplique os ajustes|aplica os ajustes/.test(normalized)) {
+    if (/recalcul|aplique os ajustes|aplica os ajustes/.test(normalized) && !/risco/.test(normalized)) {
       const proposalId = firstOpenDependencyProposalId(input.messages)
       if (proposalId) return toolResponse('apply_dependency_suggestions', { proposalId })
+    }
+    if (/reaval.*risco|recalcul.*risco|avalie os riscos/.test(normalized)) {
+      const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
+      if (eventId) return toolResponse('evaluate_event_risks', { eventId })
+    }
+    if (/qual.*evento.*(atencao|risco)|riscos.*workspace|eventos.*risco/.test(normalized)) return toolResponse('get_workspace_risks', { limit: 10 })
+    if (/risco|preocup|urgente/.test(normalized)) {
+      const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
+      if (eventId) return toolResponse('get_event_risks', { eventId, status: 'open', limit: 20 })
     }
     return toolResponse('get_workspace_overview', {})
   }

@@ -20,6 +20,7 @@ Este diretório concentra a documentação funcional e operacional do projeto.
 | 08.3 — OpenRouter | [openrouter-operational-agent.md](openrouter-operational-agent.md) |
 | 10 — Change Proposals | [mini-feature-10.md](mini-feature-10.md) |
 | 11 — Dependency Engine | [mini-feature-11.md](mini-feature-11.md) |
+| 12 — Risk Engine | [mini-feature-12.md](mini-feature-12.md) |
 
 ## Operação e benchmarks
 

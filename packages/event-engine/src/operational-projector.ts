@@ -149,6 +149,25 @@ export class OperationalProjector {
           resolveInbox: { sourceType: 'dependency_impact', sourceId: message.aggregateId, status: 'dismissed' },
         }
       }
+      case 'risk.detected': {
+        const title=text(p.title)??'Risco operacional detectado';const severity=riskInboxSeverity(p.severity)
+        return { activity:activity(eventId,'automation','risk','risk.detected','event_risk',message.aggregateId,title,riskDescription(p),p),
+          inbox:severity?inbox(eventId,'operational_risk',severity,'event_risk',message.aggregateId,title,riskDescription(p),p):null }
+      }
+      case 'risk.updated': {
+        const title=text(p.title)??'Risco operacional atualizado';const severity=riskInboxSeverity(p.severity);const previous=riskInboxSeverity(p.previousSeverity)
+        return { activity:activity(eventId,'automation','risk','risk.updated','event_risk',message.aggregateId,title,riskDescription(p),p),
+          inbox:severity&&!previous?inbox(eventId,'operational_risk',severity,'event_risk',message.aggregateId,title,riskDescription(p),p):null }
+      }
+      case 'risk.acknowledged': {
+        const title=text(p.title)??'Risco reconhecido'
+        return {activity:activity(eventId,'user','risk','risk.acknowledged','event_risk',message.aggregateId,`Risco reconhecido: ${title}`,null,p),inbox:null}
+      }
+      case 'risk.resolved': {
+        const title=text(p.title)??'Risco operacional resolvido'
+        return {activity:activity(eventId,'automation','risk','risk.resolved','event_risk',message.aggregateId,`Risco resolvido: ${title}`,null,p),inbox:null,
+          resolveInbox:{sourceType:'event_risk',sourceId:message.aggregateId,status:'resolved'}}
+      }
       default:
         return { activity: null, inbox: null }
     }
@@ -200,3 +219,6 @@ function truncate(value: string, max: number): string { return value.length <= m
 
 function dependencySeverity(value: unknown): 'info' | 'warning' | 'critical' { return value === 'critical' ? 'critical' : value === 'info' ? 'info' : 'warning' }
 function dependencyDescription(p: Record<string, unknown>): string | null { const action=text(p.action); if(action==='suggest_update') return 'Existe um ajuste calculado que pode ser aplicado após aprovação.'; return 'Esta dependência exige revisão humana antes de ser encerrada.' }
+
+function riskInboxSeverity(value: unknown): 'warning' | 'critical' | null { return value === 'critical' ? 'critical' : value === 'high' ? 'warning' : null }
+function riskDescription(p: Record<string, unknown>): string | null { const description=text(p.description); const score=typeof p.score==='number'?`Score ${p.score}/100.`:null; return [description,score].filter(Boolean).join(' ')||null }

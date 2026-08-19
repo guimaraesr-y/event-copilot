@@ -39,6 +39,11 @@ if [ "${OPERATIONAL_AGENT_PROVIDER:-}" != "deterministic" ]; then
   exit 1
 fi
 
+if [ "${RISK_SWEEP_INTERVAL_MS:-0}" != "0" ]; then
+  echo "Refusing to run: smoke environment must set RISK_SWEEP_INTERVAL_MS=0; risk coverage is event-driven/manual for determinism." >&2
+  exit 1
+fi
+
 cd "$ROOT_DIR"
 
 echo "Smoke project : $COMPOSE_PROJECT_NAME"
@@ -46,6 +51,7 @@ echo "Smoke gateway : $BASE_URL"
 echo "Messaging     : $WHATSAPP_PROVIDER"
 echo "Commands      : $COMMAND_INTERPRETER"
 echo "Agent         : $OPERATIONAL_AGENT_PROVIDER"
+echo "Risk sweep    : ${RISK_SWEEP_INTERVAL_MS}ms (disabled for smoke)"
 
 # A dedicated smoke project makes destructive reset safe and deterministic.
 # Set SMOKE_RESET=0 to preserve the previous smoke database/n8n volume.

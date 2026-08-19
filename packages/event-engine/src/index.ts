@@ -24,3 +24,5 @@ export * from './operational-agent.ts'
 export * from './change-proposal-engine.ts'
 
 export * from './dependency-engine.ts'
+
+export * from './risk-engine.ts'

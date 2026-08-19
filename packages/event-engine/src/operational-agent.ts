@@ -6,6 +6,7 @@ import type {
   CommandInterpretation,
   ChangeProposalWithImpacts,
   DependencyImpact,
+  EventRisk,
   Event,
   InboxItem,
 } from '@ecc/domain'
@@ -19,6 +20,7 @@ import type { VendorEngine } from './vendor-engine.ts'
 import type { CommandEngine } from './command-engine.ts'
 import type { ChangeProposalEngine } from './change-proposal-engine.ts'
 import type { DependencyEngine } from './dependency-engine.ts'
+import type { RiskEngine } from './risk-engine.ts'
 import type {
   AgentProviderMessage,
   AgentToolCall,
@@ -39,6 +41,7 @@ export interface OperationalAgentDependencies {
   commandEngine: CommandEngine
   changeProposalEngine: ChangeProposalEngine
   dependencyEngine: DependencyEngine
+  riskEngine: RiskEngine
   operations: OperationalAgentOperationsReader
   now?: () => Date
   newId?: () => string
@@ -185,9 +188,33 @@ const TOOLS: AgentToolDefinition[] = [
     description: 'Mark one manual-review dependency as reviewed/resolved. Only call when the CURRENT user explicitly states the review was completed.',
     parameters: objectSchema({ impactId: stringSchema('Exact dependency impact UUID.') }, ['impactId']),
   },
+  {
+    name: 'get_event_risks',
+    description: 'Get current risks for one event, ranked by operational score. Use for questions about what is worrying, urgent, late or needs attention.',
+    parameters: objectSchema({
+      eventId: stringSchema('Exact event UUID from the event catalog.'),
+      status: { type: ['string','null'], enum: ['open','acknowledged','resolved',null] },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }, ['eventId']),
+  },
+  {
+    name: 'get_workspace_risks',
+    description: 'Rank events in the tenant by current operational risk. Use for questions like which event needs attention first.',
+    parameters: objectSchema({ limit: { type: 'integer', minimum: 1, maximum: 20 } }),
+  },
+  {
+    name: 'evaluate_event_risks',
+    description: 'Force a fresh deterministic risk evaluation for one event. Only call when the CURRENT user explicitly asks to reevaluate/recalculate risks.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'acknowledge_risk',
+    description: 'Mark a current risk as acknowledged/seen without resolving its underlying cause. Only call when the CURRENT user explicitly says they are aware of that risk.',
+    parameters: objectSchema({ riskId: stringSchema('Exact risk UUID from a risk tool result.') }, ['riskId']),
+  },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -510,6 +537,34 @@ export class OperationalAgent {
         const result=await this.deps.dependencyEngine.resolveReview({organizationId:input.organizationId,impactId,decidedBySender:input.sender})
         return {reply:result.reply,duplicate:result.duplicate,dependency:serializeDependencyForAgent(result.impact)}
       }
+      case 'get_event_risks': {
+        assertNoUnexpectedKeys(call.arguments,['eventId','status','limit'])
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const status=optionalEnum(call.arguments,'status',['open','acknowledged','resolved'] as const)
+        const limit=optionalInteger(call.arguments,'limit',20,1,50)
+        const risks=await this.deps.riskEngine.list({organizationId:input.organizationId,eventId:event.id,...(status?{status}:{}),limit})
+        return {event:{id:event.id,name:event.name},risks:risks.map(serializeRiskForAgent),count:risks.length}
+      }
+      case 'get_workspace_risks': {
+        assertNoUnexpectedKeys(call.arguments,['limit'])
+        const limit=optionalInteger(call.arguments,'limit',10,1,20)
+        const summaries=await this.deps.riskEngine.workspaceSummary(input.organizationId,limit)
+        return {events:summaries.map(row=>({eventId:row.eventId,eventName:row.eventName,eventStartAt:row.eventStartAt.toISOString(),maxScore:row.maxScore,maxSeverity:row.maxSeverity,activeCount:row.activeCount,criticalCount:row.criticalCount,highCount:row.highCount,risks:row.risks.map(serializeRiskForAgent)})),count:summaries.length}
+      }
+      case 'evaluate_event_risks': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        if(!isExplicitRiskEvaluation(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to reevaluate risks')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const result=await this.deps.riskEngine.evaluateEvent({organizationId:input.organizationId,eventId:event.id,triggerType:'manual',triggerKey:`agent:${turnId}:${toolIndex}:risk-evaluation`})
+        return {reply:`Riscos de ${event.name} reavaliados: ${result.risks.length} ativo(s), ${result.detected} novo(s), ${result.updated} atualizado(s) e ${result.resolved} resolvido(s).`,duplicate:result.duplicate,risks:result.risks.slice(0,10).map(serializeRiskForAgent)}
+      }
+      case 'acknowledge_risk': {
+        assertNoUnexpectedKeys(call.arguments,['riskId'])
+        if(!isExplicitRiskAcknowledgement(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly acknowledge the risk')
+        const riskId=requiredString(call.arguments,'riskId');const current=await this.deps.riskEngine.get(input.organizationId,riskId);requireEvent(events,current.eventId)
+        const result=await this.deps.riskEngine.acknowledge({organizationId:input.organizationId,riskId,sender:input.sender})
+        return {reply:result.reply,duplicate:result.duplicate,risk:serializeRiskForAgent(result.risk)}
+      }
       default:
         throw new OperationalAgentValidationError(`Unknown operational agent tool: ${call.name}`)
     }
@@ -578,7 +633,7 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
-  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.`
+  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.`
 }
 
 function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[]): string {
@@ -657,10 +712,14 @@ function isExplicitRejection(text: string): boolean {
 }
 
 function serializeDependencyForAgent(value: DependencyImpact) { return { id:value.id,eventId:value.eventId,proposalId:value.proposalId,type:value.dependencyType,entityType:value.entityType,action:value.action,severity:value.severity,status:value.status,title:value.title,description:value.description,currentValue:value.currentValue,suggestedValue:value.suggestedValue } }
+function serializeRiskForAgent(value: EventRisk) { return { id:value.id,eventId:value.eventId,type:value.type,severity:value.severity,score:value.score,status:value.status,title:value.title,description:value.description,sourceType:value.sourceType,sourceId:value.sourceId,metadata:value.metadata,lastDetectedAt:value.lastDetectedAt.toISOString() } }
 function isExplicitDependencyApply(text:string):boolean { const n=normalizeDecisionText(text); return /\b(recalcula|recalcule|recalcular|aplica|aplique|aplicar|ajusta|ajuste|ajustar|pode ajustar|pode recalcular|pode aplicar os ajustes|todos os ajustes)\b/.test(n) }
 function isExplicitDependencyResolution(text:string):boolean { const n=normalizeDecisionText(text); return /\b(ja revisei|revisei|revisado|conferi|verificado|marque como revisado|pode resolver)\b/.test(n) }
+function isExplicitRiskEvaluation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(reavalie|reavaliar|reavalia|recalcule os riscos|recalcular os riscos|atualize os riscos|avalie os riscos)\b/.test(n) }
+function isExplicitRiskAcknowledgement(text:string):boolean { const n=normalizeDecisionText(text); return /\b(estou ciente|ciente|ja sei|estou sabendo|reconheco o risco|marque como ciente|pode reconhecer)\b/.test(n) }
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }
 function nullableStringSchema(description: string): Record<string, unknown> { return { type: ['string','null'], description } }
 function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> { return { type: 'object', additionalProperties: false, properties, required } }
 function emptyObjectSchema(): Record<string, unknown> { return objectSchema({}) }
+

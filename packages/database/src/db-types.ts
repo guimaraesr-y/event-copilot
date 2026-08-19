@@ -398,6 +398,43 @@ export interface DependencyImpactsTable {
   resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>
 }
 
+
+export interface RiskEvaluationsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  trigger_type: import('@ecc/domain').RiskTriggerType
+  trigger_key: string
+  detected_count: number
+  updated_count: number
+  resolved_count: number
+  active_count: number
+  evaluated_at: ColumnType<Date, Date | string, never>
+}
+
+export interface EventRisksTable {
+  id: string
+  organization_id: string
+  event_id: string
+  risk_key: string
+  type: import('@ecc/domain').RiskType
+  severity: import('@ecc/domain').RiskSeverity
+  score: number
+  status: import('@ecc/domain').RiskStatus
+  source_type: import('@ecc/domain').RiskSourceType
+  source_id: string | null
+  title: string
+  description: string
+  metadata: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  first_detected_at: ColumnType<Date, Date | string, Date | string>
+  last_detected_at: ColumnType<Date, Date | string, Date | string>
+  acknowledged_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  acknowledged_by: string | null
+  resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -418,6 +455,8 @@ export interface DatabaseSchema {
   change_proposal_impacts: ChangeProposalImpactsTable
   dependency_evaluations: DependencyEvaluationsTable
   dependency_impacts: DependencyImpactsTable
+  risk_evaluations: RiskEvaluationsTable
+  event_risks: EventRisksTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

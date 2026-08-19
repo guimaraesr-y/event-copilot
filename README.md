@@ -1,43 +1,44 @@
 # 🎛️ Event Command Center
 
-**Versão atual: 0.11.0 — Dependency Engine**
+**Versão atual: 0.12.0 — Risk Engine**
 
-Backend vertical para operação de eventos e cerimoniais. O ECC concentra o estado real do evento no PostgreSQL, mantém as transições de negócio em engines determinísticas e usa IA como interface operacional — nunca como fonte de verdade.
+Backend vertical para operação de eventos e cerimoniais. O ECC concentra o estado real do evento no PostgreSQL, mantém as decisões de negócio em engines determinísticas e usa IA como interface operacional — nunca como fonte de verdade.
 
 > **Princípio central:** n8n executa processos; o backend decide o que é verdade.
 
 ## 🧭 Visão geral
 
-O projeto já cobre planejamento, fornecedores, mensageria, inbound de fornecedores, Inbox operacional, comandos em linguagem natural, Operational Agent, Change Proposals e propagação controlada de dependências.
+O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências e priorização operacional por risco.
 
 ```text
 Cerimonialista / API / WhatsApp
             ↓
       Operational Agent
+            ↓ server-owned tools
+    ┌───────┼────────────┐
+    ↓       ↓            ↓
+Command  Change       consultas
+Engine   Proposal       reais
             ↓
-     server-owned tools
-       ┌────┴─────────┐
-       ↓              ↓
- CommandEngine   ChangeProposalEngine
-                       ↓ aprovação
-                  alteração sensível
-                       ↓
-                 change.applied
-                       ↓
-                DependencyEngine
-             ┌─────────┴─────────┐
-             ↓                   ↓
-     sugestão calculável     revisão humana
-             ↓                   ↓
-       aprovação explícita    Inbox operacional
-             ↓
- PostgreSQL + Transactional Outbox
-             ↓
-           Worker
-       ┌─────┴─────┐
-       ↓           ↓
-  Projections      n8n
- Activity/Inbox  efeitos externos
+       change.applied
+            ↓
+     DependencyEngine
+            ↓
+   dependency_impacts ───────┐
+                             │
+Tasks / Vendors / Inbox ─────┼──→ RiskEngine
+Change Proposals ────────────┘        ↓
+                                 event_risks
+                                      ↓
+                           Agent / API / Operational Inbox
+                                      ↓
+                         PostgreSQL + Transactional Outbox
+                                      ↓
+                                    Worker
+                                ┌─────┴─────┐
+                                ↓           ↓
+                           Projections      n8n
+                         Activity/Inbox  efeitos externos
 ```
 
 ## ✅ Features implementadas
@@ -58,31 +59,52 @@ Cerimonialista / API / WhatsApp
 | 08.3 | OpenRouter para o Operational Agent | [docs/openrouter-operational-agent.md](docs/openrouter-operational-agent.md) |
 | 10 | Change Proposals | [docs/mini-feature-10.md](docs/mini-feature-10.md) |
 | 11 | Dependency Engine | [docs/mini-feature-11.md](docs/mini-feature-11.md) |
+| 12 | Risk Engine | [docs/mini-feature-12.md](docs/mini-feature-12.md) |
 
 Áudio/voice input permanece no backlog.
 
-## 🔗 Dependency Engine
+## ⚠️ Risk Engine
 
-A Feature 11 transforma uma mudança aprovada em consequências operacionais persistidas. O engine separa o que é **deterministicamente recalculável** do que exige **revisão humana**.
-
-Exemplo:
+A Feature 12 transforma estado operacional em riscos determinísticos e priorizados.
 
 ```text
-Data do evento: 17/10 → 24/10
-        ↓
-Dependency Engine
-        ├── tarefa de template D-7 → sugere +7 dias
-        ├── milestone de template → sugere +7 dias
-        ├── tarefa manual → review
-        ├── agenda de fornecedor → sugere +7 dias
-        └── fornecedor confirmado → reconfirmação obrigatória
+"Buffet não confirmou"
+       ↓
+120 dias antes → low
+30 dias antes  → medium
+7 dias antes   → high
+1 dia antes    → critical
 ```
 
-Nenhuma dependência é aplicada silenciosamente. Sugestões ficam `open` até uma ação explícita; reviews precisam ser marcados como revisados ou descartados.
+O risco possui identidade estável. Ele pode escalar, ser reconhecido pelo operador e ser **resolvido automaticamente** quando a causa desaparece.
+
+`low` e `medium` ficam disponíveis para API/Agent; apenas `high` e `critical` abrem Operational Inbox automaticamente.
+
+O worker também executa reavaliação temporal:
+
+```env
+RISK_SWEEP_INTERVAL_MS=300000
+```
+
+Detalhes das regras e scores: [docs/mini-feature-12.md](docs/mini-feature-12.md).
+
+## 🔗 Dependency Engine
+
+Mudanças sensíveis aprovadas geram consequências persistidas. O engine separa sugestões deterministicamente recalculáveis de revisões humanas e nunca propaga uma alteração silenciosamente.
+
+```text
+Data: 17/10 → 24/10
+    ├── task de template → sugestão +7 dias
+    ├── milestone → sugestão +7 dias
+    ├── agenda de fornecedor → sugestão +7 dias
+    └── itens não determinísticos → review
+```
+
+Sugestões são stale-aware: se o alvo mudou depois da avaliação, a aplicação é recusada.
 
 ## 🤖 Operational Agent
 
-O Agent pode trabalhar sobre vários eventos e usar providers diferentes sem acesso direto ao banco.
+O Agent trabalha sobre vários eventos usando tools controladas pelo servidor. Ele pode consultar riscos e comparar a prioridade operacional do workspace sem calcular ou inventar scores.
 
 ### Ollama
 
@@ -120,14 +142,12 @@ No Windows com Git Bash, `scripts/n8n-sync.sh` desabilita automaticamente a conv
 
 ## 🧪 Validação
 
-Validação estrutural/comportamental:
-
 ```bash
 python3 scripts/validate_foundation.py
-python3 scripts/validate_feature_11.py
+python3 scripts/validate_feature_12.py
 ```
 
-Smoke isolado, sem IA paga:
+Smoke isolado e sem IA paga:
 
 ```bash
 ./scripts/smoke-env.sh
@@ -139,21 +159,22 @@ O smoke usa:
 COMMAND_INTERPRETER=rule_based
 OPERATIONAL_AGENT_PROVIDER=deterministic
 MESSAGING_PROVIDER=mock
+RISK_SWEEP_INTERVAL_MS=0
 ```
 
-Assim, CI/smoke nunca consome créditos de Ollama/OpenRouter por acidente.
+O sweep de risco fica desligado apenas no smoke; os cenários de Risk Engine são disparados por Domain Events de forma determinística.
 
 ## 📁 Estrutura
 
 ```text
 apps/
   api/                 HTTP API e composição das engines
-  worker/              outbox, projections e avaliação de dependências
+  worker/              outbox, projections, Dependency/Risk evaluation
 packages/
   domain/              contratos e regras de domínio
   database/            Kysely, repositories e migrations
   event-engine/        engines determinísticas e Operational Agent
-  integrations/        providers externos
+  messaging/           providers/adapters de mensageria
 n8n/
   workflows/           orquestração de efeitos externos
 docs/                   documentação de features e operação
@@ -169,15 +190,16 @@ validation/              cenários comportamentais
 - Writes do Agent usam tools controladas pelo servidor.
 - Data, horário, convidados e local usam Change Proposals.
 - Dependency Engine não propaga alterações sem autorização explícita.
-- Sugestões são stale-aware: se o alvo mudou desde a avaliação, a aplicação é recusada.
+- Risk Engine é determinístico; IA apenas consulta/explica riscos.
+- `acknowledged` não resolve a causa de um risco.
 - Tenant isolation continua por `organization_id`; `x-organization-id` ainda é contexto, **não autenticação real**.
 
 ## 🗺️ Roadmap
 
 ```text
 11 Dependency Engine       ✅
-12 Risk Engine             próxima
-13 Health Score
+12 Risk Engine             ✅
+13 Health Score            próxima
 14 Daily Command Brief
 15 Briefing D-1
 16 Event Day Mode
@@ -187,4 +209,4 @@ Backlog
 - Voice / áudio
 ```
 
-Para detalhes de cada slice, use o [índice de documentação](docs/README.md) em vez de adicionar documentação de feature na raiz do repositório.
+Para detalhes de cada slice, use o [índice de documentação](docs/README.md). Documentação de feature permanece em `docs/`, não na raiz.
