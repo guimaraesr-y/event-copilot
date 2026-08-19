@@ -14,6 +14,7 @@ import { migration011OperationalAgent } from './migrations/011_operational_agent
 import { migration012OperationalAgentToolTraceJsonb } from './migrations/012_operational_agent_tool_trace_jsonb.ts'
 import { migration013OperationalAgentOpenRouter } from './migrations/013_operational_agent_openrouter.ts'
 import { migration014ChangeProposals } from './migrations/014_change_proposals.ts'
+import { migration015DependencyEngine } from './migrations/015_dependency_engine.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -35,6 +36,7 @@ const migrator = new Migrator({
         '012_operational_agent_tool_trace_jsonb': migration012OperationalAgentToolTraceJsonb,
         '013_operational_agent_openrouter': migration013OperationalAgentOpenRouter,
         '014_change_proposals': migration014ChangeProposals,
+        '015_dependency_engine': migration015DependencyEngine,
       }
     },
   },

@@ -362,6 +362,42 @@ export interface ChangeProposalImpactsTable {
   created_at: ColumnType<Date, Date | string, never>
 }
 
+
+
+export interface DependencyEvaluationsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  proposal_id: string
+  source_change_event_id: string
+  change_type: import('@ecc/domain').ChangeProposalType
+  impact_count: number
+  created_at: ColumnType<Date, Date | string, never>
+}
+
+export interface DependencyImpactsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  proposal_id: string
+  source_change_event_id: string
+  rule_key: string
+  dependency_type: import('@ecc/domain').DependencyType
+  entity_type: import('@ecc/domain').DependencyEntityType
+  entity_id: string
+  action: import('@ecc/domain').DependencyAction
+  severity: import('@ecc/domain').DependencySeverity
+  status: import('@ecc/domain').DependencyStatus
+  title: string
+  description: string
+  current_value: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  suggested_value: JSONColumnType<Record<string, unknown> | null, Record<string, unknown> | null, Record<string, unknown> | null>
+  metadata: JSONColumnType<Record<string, unknown>, Record<string, unknown>, Record<string, unknown>>
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+  resolved_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -380,6 +416,8 @@ export interface DatabaseSchema {
   agent_turns: AgentTurnsTable
   change_proposals: ChangeProposalsTable
   change_proposal_impacts: ChangeProposalImpactsTable
+  dependency_evaluations: DependencyEvaluationsTable
+  dependency_impacts: DependencyImpactsTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

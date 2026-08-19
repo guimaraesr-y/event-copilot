@@ -1,14 +1,18 @@
 import { createHmac } from 'node:crypto'
 import { hostname } from 'node:os'
-import { createDatabase, OperationalRepository, OutboxRepository } from '@ecc/database'
+import { createDatabase, OperationalRepository, OutboxRepository, OrganizationRepository, KyselyEventStore, KyselyVendorStore, KyselyDependencyStore } from '@ecc/database'
 import { canonicalizeDomainEvent, type DomainEventEnvelope } from '@ecc/contracts'
 import type { OutboxMessage } from '@ecc/domain'
-import { OperationalProjector } from '@ecc/event-engine'
+import { OperationalProjector, EventEngine, VendorEngine, DependencyEngine } from '@ecc/event-engine'
 
 const db = createDatabase()
 const outbox = new OutboxRepository(db)
 const operations = new OperationalRepository(db)
 const operationalProjector = new OperationalProjector()
+const organizations = new OrganizationRepository(db)
+const eventEngine = new EventEngine({ store: new KyselyEventStore(db) })
+const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
+const dependencyEngine = new DependencyEngine({ store: new KyselyDependencyStore(db), eventEngine, vendorEngine })
 const workerId = `${hostname()}-${process.pid}`
 const pollInterval = parsePositiveInt(process.env.OUTBOX_POLL_INTERVAL_MS, 2000)
 const batchSize = parsePositiveInt(process.env.OUTBOX_BATCH_SIZE, 20)
@@ -77,6 +81,11 @@ async function tick(): Promise<void> {
   const messages = await outbox.claimBatch(workerId, batchSize)
   for (const message of messages) {
     try {
+      if (message.eventType === 'change.applied') {
+        const organization = await organizations.findById(message.organizationId)
+        if (!organization) throw new Error(`Organization ${message.organizationId} not found for dependency evaluation`)
+        await dependencyEngine.evaluateAppliedChange(message, organization.timezone)
+      }
       await operations.applyProjection(message, operationalProjector.project(message))
       await dispatch(message)
       await outbox.markDispatched(message.id, workerId)

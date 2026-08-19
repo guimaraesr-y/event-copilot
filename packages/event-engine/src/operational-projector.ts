@@ -110,6 +110,45 @@ export class OperationalProjector {
           resolveInbox: { sourceType: 'change_proposal', sourceId: message.aggregateId, status: 'dismissed' },
         }
       }
+      case 'dependency.detected': {
+        const title = text(p.title) ?? 'Dependência operacional detectada'
+        const action = text(p.action) ?? 'review'
+        return {
+          activity: null,
+          inbox: inbox(eventId, action === 'suggest_update' ? 'dependency_suggestion' : 'dependency_review', dependencySeverity(p.severity), 'dependency_impact', message.aggregateId, title, dependencyDescription(p), p),
+        }
+      }
+      case 'dependency.evaluation_completed': {
+        const count = typeof p.impactCount === 'number' ? p.impactCount : 0
+        return {
+          activity: activity(eventId, 'automation', 'change', 'dependency.evaluation_completed', 'change_proposal', message.aggregateId, 'Dependências recalculadas', `${count} impacto(s) detectado(s) após a mudança.`, p),
+          inbox: null,
+        }
+      }
+      case 'dependency.applied': {
+        const title = text(p.title) ?? 'Dependência ajustada'
+        return {
+          activity: activity(eventId, 'user', 'change', 'dependency.applied', 'dependency_impact', message.aggregateId, title, 'Sugestão de dependência aplicada.', p),
+          inbox: null,
+          resolveInbox: { sourceType: 'dependency_impact', sourceId: message.aggregateId, status: 'resolved' },
+        }
+      }
+      case 'dependency.resolved': {
+        const title = text(p.title) ?? 'Dependência revisada'
+        return {
+          activity: activity(eventId, 'user', 'change', 'dependency.resolved', 'dependency_impact', message.aggregateId, title, 'Revisão manual concluída.', p),
+          inbox: null,
+          resolveInbox: { sourceType: 'dependency_impact', sourceId: message.aggregateId, status: 'resolved' },
+        }
+      }
+      case 'dependency.dismissed': {
+        const title = text(p.title) ?? 'Dependência descartada'
+        return {
+          activity: activity(eventId, 'user', 'change', 'dependency.dismissed', 'dependency_impact', message.aggregateId, title, 'Dependência marcada como não aplicável.', p),
+          inbox: null,
+          resolveInbox: { sourceType: 'dependency_impact', sourceId: message.aggregateId, status: 'dismissed' },
+        }
+      }
       default:
         return { activity: null, inbox: null }
     }
@@ -158,3 +197,6 @@ function uuidString(value: unknown): string | null {
   return valueText && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(valueText) ? valueText : null
 }
 function truncate(value: string, max: number): string { return value.length <= max ? value : `${value.slice(0, max - 1)}…` }
+
+function dependencySeverity(value: unknown): 'info' | 'warning' | 'critical' { return value === 'critical' ? 'critical' : value === 'info' ? 'info' : 'warning' }
+function dependencyDescription(p: Record<string, unknown>): string | null { const action=text(p.action); if(action==='suggest_update') return 'Existe um ajuste calculado que pode ser aplicado após aprovação.'; return 'Esta dependência exige revisão humana antes de ser encerrada.' }

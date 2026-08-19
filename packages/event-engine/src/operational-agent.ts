@@ -5,6 +5,7 @@ import type {
   AgentTurnStore,
   CommandInterpretation,
   ChangeProposalWithImpacts,
+  DependencyImpact,
   Event,
   InboxItem,
 } from '@ecc/domain'
@@ -17,6 +18,7 @@ import type { EventEngine } from './event-engine.ts'
 import type { VendorEngine } from './vendor-engine.ts'
 import type { CommandEngine } from './command-engine.ts'
 import type { ChangeProposalEngine } from './change-proposal-engine.ts'
+import type { DependencyEngine } from './dependency-engine.ts'
 import type {
   AgentProviderMessage,
   AgentToolCall,
@@ -36,6 +38,7 @@ export interface OperationalAgentDependencies {
   vendorEngine: VendorEngine
   commandEngine: CommandEngine
   changeProposalEngine: ChangeProposalEngine
+  dependencyEngine: DependencyEngine
   operations: OperationalAgentOperationsReader
   now?: () => Date
   newId?: () => string
@@ -156,9 +159,35 @@ const TOOLS: AgentToolDefinition[] = [
     description: 'Reject one existing proposed change. ONLY call when the CURRENT user message explicitly rejects/cancels that proposal.',
     parameters: objectSchema({ proposalId: stringSchema('Exact proposal UUID.'), reason: nullableStringSchema('Optional rejection reason.') }, ['proposalId']),
   },
+  {
+    name: 'get_dependency_impacts',
+    description: 'List dependency impacts generated after approved sensitive changes. Use to explain what must be recalculated or reviewed.',
+    parameters: objectSchema({
+      eventId: nullableStringSchema('Optional exact event UUID.'),
+      proposalId: nullableStringSchema('Optional exact change proposal UUID.'),
+      status: { type: ['string','null'], enum: ['open','applied','resolved','dismissed',null] },
+      action: { type: ['string','null'], enum: ['suggest_update','review',null] },
+      limit: { type: 'integer', minimum: 1, maximum: 50 },
+    }),
+  },
+  {
+    name: 'apply_dependency_suggestion',
+    description: 'Apply one deterministic stored dependency suggestion. Only call when the CURRENT user explicitly asks to apply/recalculate that dependency.',
+    parameters: objectSchema({ impactId: stringSchema('Exact dependency impact UUID.') }, ['impactId']),
+  },
+  {
+    name: 'apply_dependency_suggestions',
+    description: 'Apply all open deterministic suggestions belonging to one change proposal. Only call when the CURRENT user explicitly asks to recalculate/apply all safe adjustments.',
+    parameters: objectSchema({ proposalId: stringSchema('Exact change proposal UUID.') }, ['proposalId']),
+  },
+  {
+    name: 'resolve_dependency_review',
+    description: 'Mark one manual-review dependency as reviewed/resolved. Only call when the CURRENT user explicitly states the review was completed.',
+    parameters: objectSchema({ impactId: stringSchema('Exact dependency impact UUID.') }, ['impactId']),
+  },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -227,10 +256,11 @@ export class OperationalAgent {
       const currentEvent = conversation?.currentEventId ? events.find((event) => event.id === conversation.currentEventId) ?? null : null
       const history = this.historyTurns > 0 ? await this.deps.store.listRecentTurns(input.organizationId, sender, this.historyTurns) : []
       const pendingProposals = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, status: 'proposed', requestedBySender: sender, limit: 10 })
+      const openDependencies = await this.deps.dependencyEngine.list({ organizationId: input.organizationId, status: 'open', limit: 30 })
 
       const messages: AgentProviderMessage[] = [
         { role: 'system', content: buildSystemPrompt(input.organizationTimezone, startedAt) },
-        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals) },
+        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals, openDependencies) },
         ...history.flatMap((turn): AgentProviderMessage[] => turn.assistantText ? [
           { role: 'user', content: turn.userText },
           { role: 'assistant', content: turn.assistantText },
@@ -449,6 +479,37 @@ export class OperationalAgent {
         const result = await this.deps.changeProposalEngine.reject({ organizationId: input.organizationId, proposalId, decidedBySender: input.sender, reason: optionalNullableString(call.arguments, 'reason') })
         return { reply: result.reply, duplicate: result.duplicate, proposal: serializeProposalForAgent(result) }
       }
+      case 'get_dependency_impacts': {
+        assertNoUnexpectedKeys(call.arguments, ['eventId','proposalId','status','action','limit'])
+        const eventId=optionalNullableString(call.arguments,'eventId'); if(eventId) requireEvent(events,eventId)
+        const proposalId=optionalNullableString(call.arguments,'proposalId')
+        const status=optionalEnum(call.arguments,'status',['open','applied','resolved','dismissed'] as const)
+        const action=optionalEnum(call.arguments,'action',['suggest_update','review'] as const)
+        const limit=optionalInteger(call.arguments,'limit',30,1,50)
+        const impacts=await this.deps.dependencyEngine.list({organizationId:input.organizationId,...(eventId?{eventId}:{}),...(proposalId?{proposalId}:{}),...(status?{status}:{}),...(action?{action}:{}),limit})
+        return { dependencies:impacts.map(serializeDependencyForAgent), count:impacts.length }
+      }
+      case 'apply_dependency_suggestion': {
+        assertNoUnexpectedKeys(call.arguments,['impactId'])
+        if(!isExplicitDependencyApply(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly authorize applying a dependency suggestion')
+        const impactId=requiredString(call.arguments,'impactId'); const current=await this.deps.dependencyEngine.get(input.organizationId,impactId); requireEvent(events,current.eventId)
+        const result=await this.deps.dependencyEngine.applySuggestion({organizationId:input.organizationId,impactId,decidedBySender:input.sender})
+        return {reply:result.reply,duplicate:result.duplicate,dependency:serializeDependencyForAgent(result.impact)}
+      }
+      case 'apply_dependency_suggestions': {
+        assertNoUnexpectedKeys(call.arguments,['proposalId'])
+        if(!isExplicitDependencyApply(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly authorize recalculating dependencies')
+        const proposalId=requiredString(call.arguments,'proposalId')
+        const result=await this.deps.dependencyEngine.applySuggestionsForProposal({organizationId:input.organizationId,proposalId,decidedBySender:input.sender})
+        return {reply:result.reply,applied:result.applied,duplicates:result.duplicates,failed:result.failed,dependencies:result.impacts.map(serializeDependencyForAgent)}
+      }
+      case 'resolve_dependency_review': {
+        assertNoUnexpectedKeys(call.arguments,['impactId'])
+        if(!isExplicitDependencyResolution(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly confirm the dependency review was completed')
+        const impactId=requiredString(call.arguments,'impactId'); const current=await this.deps.dependencyEngine.get(input.organizationId,impactId); requireEvent(events,current.eventId)
+        const result=await this.deps.dependencyEngine.resolveReview({organizationId:input.organizationId,impactId,decidedBySender:input.sender})
+        return {reply:result.reply,duplicate:result.duplicate,dependency:serializeDependencyForAgent(result.impact)}
+      }
       default:
         throw new OperationalAgentValidationError(`Unknown operational agent tool: ${call.name}`)
     }
@@ -520,10 +581,11 @@ function buildSystemPrompt(timezone: string, now: Date): string {
   return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.`
 }
 
-function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[]): string {
+function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[]): string {
   const catalog = events.slice(0, 50).map((event) => ({ id: event.id, name: event.name, type: event.type, startAt: event.startAt.toISOString(), status: event.status }))
   const proposals = pendingProposals.slice(0, 10).map((value) => ({ id: value.proposal.id, eventId: value.proposal.eventId, type: value.proposal.type, currentValue: value.proposal.currentValue, proposedValue: value.proposal.proposedValue, createdAt: value.proposal.createdAt.toISOString() }))
-  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal IDs são internos e servem apenas para tools.`
+  const dependencies = openDependencies.slice(0, 30).map(serializeDependencyForAgent)
+  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nDEPENDÊNCIAS ABERTAS\n${JSON.stringify(dependencies)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal/dependency IDs são internos e servem apenas para tools.`
 }
 
 function requireEvent(events: Event[], eventId: string): Event {
@@ -593,6 +655,10 @@ function isExplicitRejection(text: string): boolean {
   const n = normalizeDecisionText(text)
   return /^(nao|nao aprova|rejeita|rejeitado|cancela|cancelar|deixa como esta)$/.test(n) || /\b(rejeita|rejeitado|cancela|cancelar|nao aprova|deixa como esta)\b/.test(n)
 }
+
+function serializeDependencyForAgent(value: DependencyImpact) { return { id:value.id,eventId:value.eventId,proposalId:value.proposalId,type:value.dependencyType,entityType:value.entityType,action:value.action,severity:value.severity,status:value.status,title:value.title,description:value.description,currentValue:value.currentValue,suggestedValue:value.suggestedValue } }
+function isExplicitDependencyApply(text:string):boolean { const n=normalizeDecisionText(text); return /\b(recalcula|recalcule|recalcular|aplica|aplique|aplicar|ajusta|ajuste|ajustar|pode ajustar|pode recalcular|pode aplicar os ajustes|todos os ajustes)\b/.test(n) }
+function isExplicitDependencyResolution(text:string):boolean { const n=normalizeDecisionText(text); return /\b(ja revisei|revisei|revisado|conferi|verificado|marque como revisado|pode resolver)\b/.test(n) }
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }
 function nullableStringSchema(description: string): Record<string, unknown> { return { type: ['string','null'], description } }

@@ -391,6 +391,10 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const proposalId = firstPendingProposalId(input.messages)
       if (proposalId) return toolResponse('reject_change_proposal', { proposalId })
     }
+    if (/recalcul|aplique os ajustes|aplica os ajustes/.test(normalized)) {
+      const proposalId = firstOpenDependencyProposalId(input.messages)
+      if (proposalId) return toolResponse('apply_dependency_suggestions', { proposalId })
+    }
     return toolResponse('get_workspace_overview', {})
   }
 }
@@ -413,3 +417,5 @@ function firstEventId(messages: AgentProviderMessage[]): string | null {
   const context = messages.find((message) => message.role === 'system' && message.content.includes('CATÁLOGO DE EVENTOS'))?.content ?? ''
   return context.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i)?.[0] ?? null
 }
+
+function firstOpenDependencyProposalId(messages: AgentProviderMessage[]): string | null { const context=messages.find((message)=>message.role==='system'&&message.content.includes('DEPENDÊNCIAS ABERTAS'))?.content??''; const section=context.split('DEPENDÊNCIAS ABERTAS')[1]??''; const match=section.match(/\"proposalId\":\"([0-9a-f-]{36})\"/i); return match?.[1]??null }

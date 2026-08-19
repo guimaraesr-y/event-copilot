@@ -103,7 +103,8 @@ const commandEngine=new CommandEngine({store:cs,eventEngine,vendorEngine,interpr
 const cpStore=new CPStore(es)
 const changeProposalEngine=new ChangeProposalEngine({store:cpStore,eventEngine,vendorEngine,now,newId:()=>`33333333-3333-4333-8333-${String(++seq).padStart(12,'0')}`})
 const provider=new ScriptedProvider()
-const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
+const dependencyEngine={async list(){return[]},async get(){throw new Error('dependency not configured in legacy agent test')},async applySuggestion(){throw new Error('dependency not configured')},async applySuggestionsForProposal(){return{impacts:[],applied:0,duplicates:0,failed:[],reply:'0 ajuste(s) de dependência aplicado(s).'}},async resolveReview(){throw new Error('dependency not configured')}} as any
+const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
 {
