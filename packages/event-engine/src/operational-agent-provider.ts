@@ -369,6 +369,10 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
     }
     const user = [...input.messages].reverse().find((message) => message.role === 'user')?.content ?? ''
     const normalized = user.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    // Smoke/CI may run through Git Bash/MSYS, where an accented UTF-8 byte sequence can
+    // occasionally reach the API with U+FFFD. Keep the deterministic provider tolerant
+    // to that transport degradation; production AI providers still receive the raw text.
+    const healthTerm = /health|sa(?:u|\uFFFD)de/.test(normalized)
     if (normalized.includes('crie uma tarefa')) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       const dueAt = user.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})/)?.[0]
@@ -399,12 +403,12 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
-    if (/qual.*evento.*(saude|health)|health.*workspace|saude.*eventos|eventos.*saude/.test(normalized)) return toolResponse('get_workspace_health', { limit: 10 })
-    if (/reaval.*(saude|health)|recalcul.*(saude|health)|atualiz.*(saude|health)/.test(normalized)) {
+    if (healthTerm && (/qual.*evento.*(?:sa(?:u|\uFFFD)de|health)|health.*workspace|sa(?:u|\uFFFD)de.*eventos|eventos.*sa(?:u|\uFFFD)de/.test(normalized))) return toolResponse('get_workspace_health', { limit: 10 })
+    if (healthTerm && /reaval|recalcul|atualiz/.test(normalized)) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_health', { eventId })
     }
-    if (/health|saude|health score/.test(normalized)) {
+    if (healthTerm) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('get_event_health', { eventId })
     }

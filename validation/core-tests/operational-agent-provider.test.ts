@@ -1,5 +1,5 @@
-import { OllamaOperationalAgentProvider, OpenRouterOperationalAgentProvider } from '../../packages/event-engine/src/operational-agent-provider.ts'
-import type { AgentToolDefinition } from '../../packages/event-engine/src/operational-agent-provider.ts'
+import { DeterministicOperationalAgentProvider, OllamaOperationalAgentProvider, OpenRouterOperationalAgentProvider } from '../../packages/event-engine/src/operational-agent-provider.ts'
+import type { AgentProviderMessage, AgentToolDefinition } from '../../packages/event-engine/src/operational-agent-provider.ts'
 
 function assert(ok: unknown, msg: string): asserts ok { if (!ok) throw new Error(`Assertion failed: ${msg}`) }
 
@@ -140,3 +140,30 @@ console.log('OperationalAgentProvider Ollama: 4/4 behavioral scenarios passed')
 }
 
 console.log('OperationalAgentProvider OpenRouter: 4/4 behavioral scenarios passed')
+
+
+{
+  const provider = new DeterministicOperationalAgentProvider()
+  const eventId = '11111111-1111-4111-8111-111111111111'
+  const healthTools: AgentToolDefinition[] = [
+    ...tools,
+    {
+      name: 'get_event_health',
+      description: 'Get event Health Score',
+      parameters: { type: 'object', additionalProperties: false, properties: { eventId: { type: 'string' } }, required: ['eventId'] },
+    },
+  ]
+  const system: AgentProviderMessage = { role: 'system', content: `EVENTO ATUAL DA CONVERSA\n${eventId}` }
+  const variants = [
+    'Qual a saude deste evento?',
+    'Qual a saúde deste evento?',
+    'Qual a sa\uFFFDde deste evento?',
+  ]
+  for (const content of variants) {
+    const result = await provider.complete({ messages: [system, { role: 'user', content }], tools: healthTools })
+    assert(result.toolCalls[0]?.name === 'get_event_health', `deterministic health routing tolerates: ${content}`)
+    assert(result.toolCalls[0]?.arguments.eventId === eventId, 'deterministic health routing preserves current event')
+  }
+}
+
+console.log('OperationalAgentProvider deterministic health routing: 3/3 encoding scenarios passed')

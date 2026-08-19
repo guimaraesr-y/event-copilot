@@ -30,6 +30,10 @@ for n in ['KyselyHealthStore','HealthEngine','healthEngine.evaluateDomainEvent']
 if "case 'health.updated'" not in text('packages/event-engine/src/operational-projector.ts'): fail('projector missing health.updated')
 for n in ['57/68 wait for Health Score degradation','58/68 query Health Score through Operational Agent','63/68 verify Health Score history and activity','68/68 verify all generated domain events']:
   if n not in text('scripts/smoke.sh'): fail(f'smoke missing {n}')
+smoke=text('scripts/smoke.sh')
+if 'Qual a saude deste evento?' not in smoke: fail('health smoke request must stay ASCII-safe for Git Bash/MSYS')
+provider=text('packages/event-engine/src/operational-agent-provider.ts')
+if r'sa(?:u|\uFFFD)de' not in provider: fail('deterministic provider missing degraded UTF-8 health-term tolerance')
 for doc in ['docs/mini-feature-13.md','docs/mini-feature-12.md','docs/mini-feature-11.md','docs/mini-feature-10.md']:
   text(doc)
 readme=text('README.md')

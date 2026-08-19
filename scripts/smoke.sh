@@ -525,7 +525,7 @@ HEALTH_JSON=$(curl -fsS "$BASE_URL/api/v1/events/$EVENT_ID/health-score" -H "x-o
 printf '%s' "$HEALTH_JSON" | grep -q '"breakdown"' || { echo "health API missing breakdown: $HEALTH_JSON"; exit 1; }
 
 printf '58/68 query Health Score through Operational Agent... '
-AGENT_HEALTH=$(curl -fsS -X POST "$BASE_URL/api/v1/agent/messages" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"health-smoke\",\"explicitEventId\":\"$EVENT_ID\",\"text\":\"Qual a saúde deste evento?\",\"idempotencyKey\":\"smoke-agent-health-1\"}")
+AGENT_HEALTH=$(curl -fsS -X POST "$BASE_URL/api/v1/agent/messages" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"health-smoke\",\"explicitEventId\":\"$EVENT_ID\",\"text\":\"Qual a saude deste evento?\",\"idempotencyKey\":\"smoke-agent-health-1\"}")
 printf '%s' "$AGENT_HEALTH" | grep -q 'get_event_health' || { echo "agent did not use get_event_health: $AGENT_HEALTH"; exit 1; }
 echo OK
 
