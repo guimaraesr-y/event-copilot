@@ -1,6 +1,6 @@
 # 🎛️ Event Command Center
 
-**Versão atual: 0.12.0 — Risk Engine**
+**Versão atual: 0.13.0 — Health Score**
 
 Backend vertical para operação de eventos e cerimoniais. O ECC concentra o estado real do evento no PostgreSQL, mantém as decisões de negócio em engines determinísticas e usa IA como interface operacional — nunca como fonte de verdade.
 
@@ -8,7 +8,7 @@ Backend vertical para operação de eventos e cerimoniais. O ECC concentra o est
 
 ## 🧭 Visão geral
 
-O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências e priorização operacional por risco.
+O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências, priorização operacional por risco e Health Score explicável por evento.
 
 ```text
 Cerimonialista / API / WhatsApp
@@ -29,6 +29,10 @@ Engine   Proposal       reais
 Tasks / Vendors / Inbox ─────┼──→ RiskEngine
 Change Proposals ────────────┘        ↓
                                  event_risks
+                                      ↓
+                                 HealthEngine
+                                      ↓
+                      events.health_score + histórico
                                       ↓
                            Agent / API / Operational Inbox
                                       ↓
@@ -60,8 +64,39 @@ Change Proposals ────────────┘        ↓
 | 10 | Change Proposals | [docs/mini-feature-10.md](docs/mini-feature-10.md) |
 | 11 | Dependency Engine | [docs/mini-feature-11.md](docs/mini-feature-11.md) |
 | 12 | Risk Engine | [docs/mini-feature-12.md](docs/mini-feature-12.md) |
+| 13 | Health Score | [docs/mini-feature-13.md](docs/mini-feature-13.md) |
 
 Áudio/voice input permanece no backlog.
+
+## 💚 Health Score
+
+A Feature 13 transforma riscos ativos em uma leitura operacional única de `0–100`, mantendo o cálculo totalmente determinístico.
+
+```text
+Risk Engine
+    ↓
+riscos ativos
+    ↓
+Health Engine
+    ├── penalidade por categoria
+    ├── severity ceiling
+    └── breakdown explicável
+    ↓
+events.health_score
+```
+
+Faixas atuais:
+
+```text
+90–100  excellent
+75–89   good
+55–74   attention
+0–54    critical
+```
+
+Health Score **não é percentual de planejamento concluído**. Riscos reconhecidos continuam penalizando até que a causa seja resolvida. Cada avaliação registra histórico, delta e os principais fatores responsáveis pela nota.
+
+Detalhes da fórmula: [docs/mini-feature-13.md](docs/mini-feature-13.md).
 
 ## ⚠️ Risk Engine
 
@@ -104,7 +139,7 @@ Sugestões são stale-aware: se o alvo mudou depois da avaliação, a aplicaçã
 
 ## 🤖 Operational Agent
 
-O Agent trabalha sobre vários eventos usando tools controladas pelo servidor. Ele pode consultar riscos e comparar a prioridade operacional do workspace sem calcular ou inventar scores.
+O Agent trabalha sobre vários eventos usando tools controladas pelo servidor. Ele pode consultar riscos, Health Score e comparar a prioridade operacional do workspace sem calcular ou inventar scores.
 
 ### Ollama
 
@@ -144,7 +179,7 @@ No Windows com Git Bash, `scripts/n8n-sync.sh` desabilita automaticamente a conv
 
 ```bash
 python3 scripts/validate_foundation.py
-python3 scripts/validate_feature_12.py
+python3 scripts/validate_feature_13.py
 ```
 
 Smoke isolado e sem IA paga:
@@ -169,7 +204,7 @@ O sweep de risco fica desligado apenas no smoke; os cenários de Risk Engine sã
 ```text
 apps/
   api/                 HTTP API e composição das engines
-  worker/              outbox, projections, Dependency/Risk evaluation
+  worker/              outbox, projections, Dependency/Risk/Health evaluation
 packages/
   domain/              contratos e regras de domínio
   database/            Kysely, repositories e migrations
@@ -191,6 +226,7 @@ validation/              cenários comportamentais
 - Data, horário, convidados e local usam Change Proposals.
 - Dependency Engine não propaga alterações sem autorização explícita.
 - Risk Engine é determinístico; IA apenas consulta/explica riscos.
+- Health Score é calculado pelo backend a partir dos riscos ativos; IA não escolhe nota nem tendência.
 - `acknowledged` não resolve a causa de um risco.
 - Tenant isolation continua por `organization_id`; `x-organization-id` ainda é contexto, **não autenticação real**.
 
@@ -199,8 +235,8 @@ validation/              cenários comportamentais
 ```text
 11 Dependency Engine       ✅
 12 Risk Engine             ✅
-13 Health Score            próxima
-14 Daily Command Brief
+13 Health Score            ✅
+14 Daily Command Brief     próxima
 15 Briefing D-1
 16 Event Day Mode
 17 Dashboard

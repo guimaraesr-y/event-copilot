@@ -14,10 +14,11 @@ import {
   KyselyChangeProposalStore,
   KyselyDependencyStore,
   KyselyRiskStore,
+  KyselyHealthStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent, ChangeProposalEngine, DependencyEngine, RiskEngine } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent, ChangeProposalEngine, DependencyEngine, RiskEngine, HealthEngine } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
@@ -35,6 +36,7 @@ import { registerOperationalAgentRoutes } from './routes/agent.ts'
 import { registerChangeProposalRoutes } from './routes/change-proposals.ts'
 import { registerDependencyRoutes } from './routes/dependencies.ts'
 import { registerRiskRoutes } from './routes/risks.ts'
+import { registerHealthScoreRoutes } from './routes/health-scores.ts'
 import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
@@ -51,6 +53,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const changeProposalEngine = new ChangeProposalEngine({ store: new KyselyChangeProposalStore(db), eventEngine, vendorEngine })
   const dependencyEngine = new DependencyEngine({ store: new KyselyDependencyStore(db), eventEngine, vendorEngine })
   const riskEngine = new RiskEngine({ store: new KyselyRiskStore(db) })
+  const healthEngine = new HealthEngine({ store: new KyselyHealthStore(db) })
   const operationalAgent = new OperationalAgent({
     store: new KyselyAgentStore(db),
     provider: createOperationalAgentProvider(),
@@ -60,6 +63,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
     changeProposalEngine,
     dependencyEngine,
     riskEngine,
+    healthEngine,
     operations: operationalRepository,
     ...operationalAgentLimits(),
   })
@@ -89,6 +93,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerChangeProposalRoutes(app, organizationRepository, changeProposalEngine)
   registerDependencyRoutes(app, organizationRepository, dependencyEngine)
   registerRiskRoutes(app, organizationRepository, riskEngine)
+  registerHealthScoreRoutes(app, organizationRepository, healthEngine)
 
   return app
 }

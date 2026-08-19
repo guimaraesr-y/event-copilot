@@ -21,6 +21,7 @@ import type { CommandEngine } from './command-engine.ts'
 import type { ChangeProposalEngine } from './change-proposal-engine.ts'
 import type { DependencyEngine } from './dependency-engine.ts'
 import type { RiskEngine } from './risk-engine.ts'
+import type { HealthEngine } from './health-engine.ts'
 import type {
   AgentProviderMessage,
   AgentToolCall,
@@ -42,6 +43,7 @@ export interface OperationalAgentDependencies {
   changeProposalEngine: ChangeProposalEngine
   dependencyEngine: DependencyEngine
   riskEngine: RiskEngine
+  healthEngine: HealthEngine
   operations: OperationalAgentOperationsReader
   now?: () => Date
   newId?: () => string
@@ -207,6 +209,22 @@ const TOOLS: AgentToolDefinition[] = [
     description: 'Force a fresh deterministic risk evaluation for one event. Only call when the CURRENT user explicitly asks to reevaluate/recalculate risks.',
     parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
   },
+
+  {
+    name: 'get_event_health',
+    description: 'Get the current deterministic Health Score for one event, including status, delta and explainable penalty breakdown.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'get_workspace_health',
+    description: 'Rank active events by Health Score from least healthy to healthiest. Use for comparisons of overall operational health.',
+    parameters: objectSchema({ limit: { type: 'integer', minimum: 1, maximum: 30 } }),
+  },
+  {
+    name: 'evaluate_event_health',
+    description: 'Force a fresh deterministic Health Score evaluation for one event. Only call when the CURRENT user explicitly asks to recalculate/re-evaluate health.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
   {
     name: 'acknowledge_risk',
     description: 'Mark a current risk as acknowledged/seen without resolving its underlying cause. Only call when the CURRENT user explicitly says they are aware of that risk.',
@@ -214,7 +232,7 @@ const TOOLS: AgentToolDefinition[] = [
   },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -558,6 +576,26 @@ export class OperationalAgent {
         const result=await this.deps.riskEngine.evaluateEvent({organizationId:input.organizationId,eventId:event.id,triggerType:'manual',triggerKey:`agent:${turnId}:${toolIndex}:risk-evaluation`})
         return {reply:`Riscos de ${event.name} reavaliados: ${result.risks.length} ativo(s), ${result.detected} novo(s), ${result.updated} atualizado(s) e ${result.resolved} resolvido(s).`,duplicate:result.duplicate,risks:result.risks.slice(0,10).map(serializeRiskForAgent)}
       }
+
+      case 'get_event_health': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const health=await this.deps.healthEngine.getCurrent(input.organizationId,event.id)
+        return {event:{id:event.id,name:event.name},health:serializeHealthForAgent(health)}
+      }
+      case 'get_workspace_health': {
+        assertNoUnexpectedKeys(call.arguments,['limit'])
+        const limit=optionalInteger(call.arguments,'limit',10,1,30)
+        const rows=await this.deps.healthEngine.workspace(input.organizationId,limit)
+        return {events:rows.map(serializeHealthForAgent),count:rows.length}
+      }
+      case 'evaluate_event_health': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        if(!isExplicitHealthEvaluation(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to reevaluate health score')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const result=await this.deps.healthEngine.evaluateEvent({organizationId:input.organizationId,eventId:event.id,triggerType:'manual',triggerKey:`agent:${turnId}:${toolIndex}:health-evaluation`})
+        return {reply:`Health Score de ${event.name} recalculado: ${result.evaluation.score}/100 (${healthLabel(result.evaluation.status)}).`,duplicate:result.duplicate,changed:result.changed,health:serializeHealthEvaluationForAgent(result.evaluation)}
+      }
       case 'acknowledge_risk': {
         assertNoUnexpectedKeys(call.arguments,['riskId'])
         if(!isExplicitRiskAcknowledgement(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly acknowledge the risk')
@@ -633,7 +671,7 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
-  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.`
+  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.`
 }
 
 function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[]): string {
@@ -717,6 +755,12 @@ function isExplicitDependencyApply(text:string):boolean { const n=normalizeDecis
 function isExplicitDependencyResolution(text:string):boolean { const n=normalizeDecisionText(text); return /\b(ja revisei|revisei|revisado|conferi|verificado|marque como revisado|pode resolver)\b/.test(n) }
 function isExplicitRiskEvaluation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(reavalie|reavaliar|reavalia|recalcule os riscos|recalcular os riscos|atualize os riscos|avalie os riscos)\b/.test(n) }
 function isExplicitRiskAcknowledgement(text:string):boolean { const n=normalizeDecisionText(text); return /\b(estou ciente|ciente|ja sei|estou sabendo|reconheco o risco|marque como ciente|pode reconhecer)\b/.test(n) }
+
+function serializeHealthForAgent(value: import('@ecc/domain').EventHealthCurrent) { return { eventId:value.event.id,eventName:value.event.name,eventStartAt:value.event.startAt.toISOString(),score:value.score,status:value.status,delta:value.delta,evaluatedAt:value.evaluatedAt?.toISOString()??null,breakdown:value.breakdown } }
+function serializeHealthEvaluationForAgent(value: import('@ecc/domain').EventHealthEvaluation) { return { score:value.score,previousScore:value.previousScore,delta:value.delta,status:value.status,breakdown:value.breakdown,evaluatedAt:value.evaluatedAt.toISOString() } }
+function isExplicitHealthEvaluation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar|avalie|avaliar).*(saude|health|score)\b|\b(saude|health|score).*(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar)\b/.test(n) }
+function healthLabel(status: import('@ecc/domain').HealthStatus): string { return status==='excellent'?'excelente':status==='good'?'bom':status==='attention'?'atenção':'crítico' }
+
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }
 function nullableStringSchema(description: string): Record<string, unknown> { return { type: ['string','null'], description } }

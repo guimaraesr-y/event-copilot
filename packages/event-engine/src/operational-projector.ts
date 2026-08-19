@@ -168,6 +168,12 @@ export class OperationalProjector {
         return {activity:activity(eventId,'automation','risk','risk.resolved','event_risk',message.aggregateId,`Risco resolvido: ${title}`,null,p),inbox:null,
           resolveInbox:{sourceType:'event_risk',sourceId:message.aggregateId,status:'resolved'}}
       }
+      case 'health.updated': {
+        const score=typeof p.score==='number'?p.score:null; const previous=typeof p.previousScore==='number'?p.previousScore:null; const delta=typeof p.delta==='number'?p.delta:null
+        const title=score===null?'Health Score atualizado':`Health Score atualizado para ${score}/100`
+        const description=previous===null?null:`Anterior: ${previous}/100${delta===null?'':` (${delta>=0?'+':''}${delta})`}.`
+        return {activity:activity(eventId,'automation','system','health.updated','event',message.aggregateId,title,description,p),inbox:null}
+      }
       default:
         return { activity: null, inbox: null }
     }

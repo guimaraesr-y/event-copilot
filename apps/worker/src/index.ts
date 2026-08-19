@@ -1,9 +1,9 @@
 import { createHmac } from 'node:crypto'
 import { hostname } from 'node:os'
-import { createDatabase, OperationalRepository, OutboxRepository, OrganizationRepository, KyselyEventStore, KyselyVendorStore, KyselyDependencyStore, KyselyRiskStore } from '@ecc/database'
+import { createDatabase, OperationalRepository, OutboxRepository, OrganizationRepository, KyselyEventStore, KyselyVendorStore, KyselyDependencyStore, KyselyRiskStore, KyselyHealthStore } from '@ecc/database'
 import { canonicalizeDomainEvent, type DomainEventEnvelope } from '@ecc/contracts'
 import type { OutboxMessage } from '@ecc/domain'
-import { OperationalProjector, EventEngine, VendorEngine, DependencyEngine, RiskEngine } from '@ecc/event-engine'
+import { OperationalProjector, EventEngine, VendorEngine, DependencyEngine, RiskEngine, HealthEngine } from '@ecc/event-engine'
 
 const db = createDatabase()
 const outbox = new OutboxRepository(db)
@@ -14,6 +14,7 @@ const eventEngine = new EventEngine({ store: new KyselyEventStore(db) })
 const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
 const dependencyEngine = new DependencyEngine({ store: new KyselyDependencyStore(db), eventEngine, vendorEngine })
 const riskEngine = new RiskEngine({ store: new KyselyRiskStore(db) })
+const healthEngine = new HealthEngine({ store: new KyselyHealthStore(db) })
 const workerId = `${hostname()}-${process.pid}`
 const pollInterval = parsePositiveInt(process.env.OUTBOX_POLL_INTERVAL_MS, 2000)
 const batchSize = parsePositiveInt(process.env.OUTBOX_BATCH_SIZE, 20)
@@ -91,6 +92,7 @@ async function tick(): Promise<void> {
       }
       await operations.applyProjection(message, operationalProjector.project(message))
       await riskEngine.evaluateDomainEvent(message)
+      await healthEngine.evaluateDomainEvent(message)
       await dispatch(message)
       await outbox.markDispatched(message.id, workerId)
     } catch (error) {

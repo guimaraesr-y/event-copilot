@@ -22,3 +22,5 @@ export * from './change.ts'
 export * from './dependency.ts'
 
 export * from './risk.ts'
+
+export * from './health.ts'

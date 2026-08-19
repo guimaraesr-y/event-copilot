@@ -435,6 +435,21 @@ export interface EventRisksTable {
   updated_at: ColumnType<Date, Date | string, Date | string>
 }
 
+
+export interface EventHealthEvaluationsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  trigger_type: import('@ecc/domain').HealthTriggerType
+  trigger_key: string
+  previous_score: number
+  score: number
+  delta: number
+  status: import('@ecc/domain').HealthStatus
+  breakdown: JSONColumnType<import('@ecc/domain').HealthBreakdown, import('@ecc/domain').HealthBreakdown, import('@ecc/domain').HealthBreakdown>
+  evaluated_at: ColumnType<Date, Date | string, never>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -457,6 +472,7 @@ export interface DatabaseSchema {
   dependency_impacts: DependencyImpactsTable
   risk_evaluations: RiskEvaluationsTable
   event_risks: EventRisksTable
+  event_health_evaluations: EventHealthEvaluationsTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

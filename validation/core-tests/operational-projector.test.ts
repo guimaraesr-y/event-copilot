@@ -46,4 +46,6 @@ projection = projector.project(event('risk.updated', { eventId, title: 'Risco es
 ok(projection.inbox?.severity === 'critical', 'risk escalation into high/critical opens inbox')
 projection = projector.project(event('risk.resolved', { eventId, title: 'Risco resolvido', severity: 'high', score: 0 }))
 ok(projection.activity?.action === 'risk.resolved' && projection.resolveInbox?.sourceType === 'event_risk', 'resolved risk closes risk inbox')
+projection = projector.project(event('health.updated', { eventId, previousScore: 72, score: 88, delta: 16, status: 'good' }))
+ok(projection.activity?.action === 'health.updated' && projection.activity.category === 'system' && projection.inbox === null, 'health update becomes activity without duplicate inbox')
 console.log(`OperationalProjector scenarios: ${passed}/${passed}`)

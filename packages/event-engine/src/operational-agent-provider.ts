@@ -399,6 +399,15 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
+    if (/qual.*evento.*(saude|health)|health.*workspace|saude.*eventos|eventos.*saude/.test(normalized)) return toolResponse('get_workspace_health', { limit: 10 })
+    if (/reaval.*(saude|health)|recalcul.*(saude|health)|atualiz.*(saude|health)/.test(normalized)) {
+      const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
+      if (eventId) return toolResponse('evaluate_event_health', { eventId })
+    }
+    if (/health|saude|health score/.test(normalized)) {
+      const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
+      if (eventId) return toolResponse('get_event_health', { eventId })
+    }
     if (/qual.*evento.*(atencao|risco)|riscos.*workspace|eventos.*risco/.test(normalized)) return toolResponse('get_workspace_risks', { limit: 10 })
     if (/risco|preocup|urgente/.test(normalized)) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)

@@ -89,6 +89,8 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
     if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
+    if(user.includes('Recalcule a saúde')) return tool('evaluate_event_health',{eventId:ANA})
+    if(user.includes('saúde')) return tool('get_event_health',{eventId:ANA})
     if(user==='NÃO APROVE'){const system=input.messages.find(m=>m.role==='system'&&m.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content??'';const section=system.split('PROPOSTAS DE MUDANÇA PENDENTES')[1]??'';const proposalId=section.match(/\"id\":\"([0-9a-f-]{36})\"/i)?.[1];if(proposalId)return tool('approve_change_proposal',{proposalId})}
     if(user.trim().toLowerCase()==='sim'){const system=input.messages.find(m=>m.role==='system'&&m.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content??'';const section=system.split('PROPOSTAS DE MUDANÇA PENDENTES')[1]??'';const proposalId=section.match(/\"id\":\"([0-9a-f-]{36})\"/i)?.[1];if(proposalId)return tool('approve_change_proposal',{proposalId})}
     return tool('get_event_details',{eventId:ANA})
@@ -105,7 +107,8 @@ const changeProposalEngine=new ChangeProposalEngine({store:cpStore,eventEngine,v
 const provider=new ScriptedProvider()
 const dependencyEngine={async list(){return[]},async get(){throw new Error('dependency not configured in legacy agent test')},async applySuggestion(){throw new Error('dependency not configured')},async applySuggestionsForProposal(){return{impacts:[],applied:0,duplicates:0,failed:[],reply:'0 ajuste(s) de dependência aplicado(s).'}},async resolveReview(){throw new Error('dependency not configured')}} as any
 const riskEngine={async list(){return[]},async workspaceSummary(){return[]},async evaluateEvent(){return{risks:[],detected:0,updated:0,resolved:0,duplicate:false}},async get(){throw new Error('risk not configured')},async acknowledge(){throw new Error('risk not configured')}} as any
-const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
+const healthEngine={async getCurrent(_o:string,eventId:string){const e=es.events.find(x=>x.id===eventId)!;return{event:e,score:e.healthScore,status:'excellent',breakdown:null,evaluatedAt:null,delta:null}},async workspace(){return[]},async evaluateEvent(){return{evaluation:{score:100,status:'excellent',previousScore:100,delta:0,breakdown:{},evaluatedAt:fixedNow},duplicate:false,changed:false}}} as any
+const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
 {
@@ -157,6 +160,14 @@ let createdTurnId=''
   assert(ambiguous,'generic approval is blocked when more than one proposal is pending')
 }
 {
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Qual a saúde deste evento?',idempotencyKey:'agent-health-read'})
+  assert(r.turn.toolTrace[0]?.name==='get_event_health'&&r.turn.modelCalls===2,'agent reads deterministic Health Score through health tool')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Recalcule a saúde deste evento',idempotencyKey:'agent-health-evaluate'})
+  assert(r.turn.toolTrace[0]?.name==='evaluate_event_health'&&r.turn.modelCalls===1,'explicit Health Score recalculation uses guarded write tool')
+}
+{
   const {turn}=await as.createTurnIfAbsent({id:'stuck-turn',organizationId:'org-1',sender:'planner',idempotencyKey:'stuck-key',userText:'Como estão meus eventos?',provider:'ollama',model:'fake',now:fixedNow})
   await as.updateTurn('org-1',turn.id,{status:'processing',updatedAt:fixedNow})
   let conflict=false
@@ -164,4 +175,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 9/9 behavioral scenarios passed')
+console.log('OperationalAgent: 11/11 behavioral scenarios passed')
