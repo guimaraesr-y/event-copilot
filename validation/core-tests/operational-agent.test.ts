@@ -93,6 +93,8 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('ative meu brief diario')) return tool('configure_daily_brief',{enabled:'true'})
     if(user.includes('mude apenas o horario do brief diario')) return tool('configure_daily_brief',{enabled:'true',localTime:'22:10'})
     if(user.includes('desative meu brief diario')) return tool('configure_daily_brief',{enabled:'true'})
+    if(user.includes('envie para 21996570056')) return tool('configure_daily_brief',{recipient:'21996570056'})
+    if(user.trim()==='21995551234') return tool('configure_daily_brief',{recipient:'21995551234'})
     if(user.includes('Configure o brief')) return tool('configure_daily_brief',{enabled:true,localTime:'07:30',recipient:'+5521999999999'})
     if(user.includes('Qual o brief')) return tool('get_daily_brief',{})
     if(user.includes('Gere o brief')) return tool('generate_daily_brief',{})
@@ -192,6 +194,17 @@ let createdTurnId=''
   assert(r.reply.includes('informe o número de WhatsApp'),'missing delivery recipient is handled conversationally instead of HTTP 422')
 }
 {
+  const r=await agent.chat({...base,text:'envie para 21996570056',idempotencyKey:'agent-brief-recipient-continuation'})
+  assert(r.turn.toolTrace[0]?.name==='configure_daily_brief','phone-only follow-up continues pending Daily Brief configuration')
+  assert(briefState.preference.enabled&&briefState.preference.localTime==='21:50'&&briefState.preference.recipient==='21996570056','pending recipient follow-up completes activation without repeating Daily Brief wording')
+}
+{
+  let blocked=false
+  try{await agent.chat({...base,text:'21995551234',idempotencyKey:'agent-brief-random-phone'})}catch(error){blocked=typeof error==='object'&&error!==null&&'code'in error&&(error as {code?:unknown}).code==='OPERATIONAL_AGENT_VALIDATION_ERROR'}
+  assert(blocked,'phone-only message is blocked when there is no pending Daily Brief recipient request')
+}
+{
+  briefState.preference={...briefState.preference,enabled:false,localTime:'21:50',recipient:null}
   const r=await agent.chat({...base,text:'ative meu brief diario',idempotencyKey:'agent-brief-string-boolean'})
   assert(!briefState.preference.enabled&&briefState.preference.localTime==='21:50','string boolean from model no longer causes 422 and preserves configured time')
   assert(r.reply.includes('informe o número de WhatsApp'),'activation without recipient asks for WhatsApp number')
@@ -222,4 +235,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 19/19 behavioral scenarios passed')
+console.log('OperationalAgent: 21/21 behavioral scenarios passed')

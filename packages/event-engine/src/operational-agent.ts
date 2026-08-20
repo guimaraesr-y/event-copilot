@@ -371,7 +371,7 @@ export class OperationalAgent {
         for (const call of response.toolCalls) {
           totalToolCalls += 1
           if (totalToolCalls > this.maxToolCalls) throw new OperationalAgentLoopError(`Agent exceeded max tool calls (${this.maxToolCalls})`)
-          const result = await this.executeTool(input, initial.id, totalToolCalls, events, call)
+          const result = await this.executeTool(input, initial.id, totalToolCalls, events, call, history)
           trace.push({ index: totalToolCalls, name: call.name, arguments: call.arguments, result })
           batchResults.push({ call, result })
           messages.push({ role: 'tool', toolName: call.name, ...(call.id ? { toolCallId: call.id } : {}), content: JSON.stringify(result) })
@@ -413,6 +413,7 @@ export class OperationalAgent {
     toolIndex: number,
     events: Event[],
     call: AgentToolCall,
+    history: AgentTurn[],
   ): Promise<Record<string, unknown>> {
     switch (call.name) {
       case 'get_workspace_overview': {
@@ -652,9 +653,11 @@ export class OperationalAgent {
       }
       case 'configure_daily_brief': {
         assertNoUnexpectedKeys(call.arguments,['enabled','localTime','recipient'])
-        if(!isExplicitBriefConfiguration(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to configure the daily brief')
+        const pendingRecipientActivation=isPendingBriefRecipientActivation(history)
+        const recipientContinuation=pendingRecipientActivation&&extractPhone(input.text)!==undefined
+        if(!isExplicitBriefConfiguration(input.text)&&!recipientContinuation) throw new OperationalAgentValidationError('Current user message does not explicitly ask to configure the daily brief')
         const current=await this.deps.briefEngine.getPreference(input.organizationId)
-        const patch=resolveBriefConfiguration(input.text,call.arguments)
+        const patch=resolveBriefConfiguration(input.text,call.arguments,{completePendingActivation:recipientContinuation})
         if(patch.enabled===undefined&&patch.localTime===undefined&&patch.recipient===undefined) throw new OperationalAgentValidationError('configure_daily_brief requires at least one setting')
 
         const senderRecipient=whatsAppRecipientFromSender(input.sender)
@@ -759,7 +762,7 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
   return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.
-17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.`
+17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.\n18. Se o turno anterior pediu especificamente o número de WhatsApp para concluir a ativação do Daily Brief, uma resposta curta contendo apenas o número (por exemplo "envie para 21999999999") é continuação válida: use configure_daily_brief com recipient e não exija que o usuário repita "brief diário".`
 }
 
 function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[], briefPreference: import('@ecc/domain').BriefPreference): string {
@@ -858,8 +861,8 @@ function isExplicitBriefConfiguration(text:string):boolean {
   return /\b(brief|resumo).*(ativ|desativ|horario|hora|todo dia|todos os dias|diario|diariamente|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere|habilite|desligue).*(brief|resumo)\b/.test(n)
     || (/\b(whatsapp|numero|telefone)\b/.test(n)&&extractPhone(text)!==undefined)
 }
-function resolveBriefConfiguration(text:string,args:Record<string,unknown>):{enabled?:boolean;localTime?:string;recipient?:string|null}{
-  const enabledIntent=briefEnabledIntent(text)
+function resolveBriefConfiguration(text:string,args:Record<string,unknown>,options:{completePendingActivation?:boolean}={}):{enabled?:boolean;localTime?:string;recipient?:string|null}{
+  const enabledIntent=options.completePendingActivation?true:briefEnabledIntent(text)
   const localTime=extractBriefLocalTime(text)??coerceLocalTime(args.localTime)
   const textRecipient=extractPhone(text)
   const recipient=textRecipient!==undefined?textRecipient:coerceRecipient(args.recipient)
@@ -868,6 +871,12 @@ function resolveBriefConfiguration(text:string,args:Record<string,unknown>):{ena
     ...(localTime!==undefined?{localTime}:{}),
     ...(recipient!==undefined?{recipient}:{}),
   }
+}
+function isPendingBriefRecipientActivation(history:AgentTurn[]):boolean{
+  const previous=history.at(-1)
+  if(!previous)return false
+  const lastConfigure=[...previous.toolTrace].reverse().find(entry=>entry.name==='configure_daily_brief')
+  return lastConfigure?.result?.needsRecipient===true
 }
 function briefEnabledIntent(text:string):boolean|null{
   const n=normalizeDecisionText(text)

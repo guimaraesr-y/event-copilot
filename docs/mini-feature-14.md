@@ -225,6 +225,8 @@ Para configuração do schedule, o texto atual do usuário é a fonte autoritati
 
 Quando o Agent é acessado pelo próprio WhatsApp, o `sender` pode ser usado como destinatário de fallback ao habilitar a configuração. No CLI/local, em que o sender pode ser `planner-local`, uma ativação sem telefone salva o horário mas mantém `enabled=false` e pede explicitamente um número de WhatsApp.
 
+Quando o Agent pede esse número, o turno fica marcado estruturalmente com `needsRecipient=true`. O próximo turno pode então responder somente `envie para 21996570056` (ou apenas o número): esse complemento é aceito como continuação da mesma configuração, salva o destinatário e conclui a ativação. Um telefone isolado fora desse estado pendente continua bloqueado pelo guard server-side.
+
 ## Segurança e idempotência
 
 - scheduler não depende do LLM;
