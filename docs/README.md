@@ -23,6 +23,7 @@ Este diretório concentra a documentação funcional e operacional do projeto.
 | 12 — Risk Engine | [mini-feature-12.md](mini-feature-12.md) |
 | 13 — Health Score | [mini-feature-13.md](mini-feature-13.md) |
 | 14 — Daily Command Brief | [mini-feature-14.md](mini-feature-14.md) |
+| 15 — Briefing D-1 | [mini-feature-15.md](mini-feature-15.md) |
 
 ## Operação e benchmarks
 

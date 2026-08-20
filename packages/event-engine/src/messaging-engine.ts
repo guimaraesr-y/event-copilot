@@ -18,8 +18,9 @@ import {
 
 const VENDOR_CONFIRMATION_ACTION = 'vendor_confirmation.prepare'
 const VENDOR_CONFIRMATION_MESSAGE = 'vendor_confirmation'
-const DAILY_BRIEF_ACTION = 'daily_brief.prepare'
-const DAILY_BRIEF_MESSAGE = 'daily_brief'
+const LEGACY_DAILY_BRIEF_ACTION = 'daily_brief.prepare'
+const BRIEF_ACTION = 'brief.prepare'
+const BRIEF_MESSAGE_TYPES = new Set(['daily_brief','d_minus_1_brief'])
 
 export interface MessagingEngineDependencies {
   store: MessageStore
@@ -99,24 +100,29 @@ export class MessagingEngine {
     }))
   }
 
-  async prepareDailyBrief(actionId: string): Promise<{ message: OutboundMessage; created: boolean }> {
+  async prepareBrief(actionId: string): Promise<{ message: OutboundMessage; created: boolean }> {
     const action = await this.store.findAutomationAction(actionId)
     if (!action) throw new AutomationActionNotFoundError()
-    if (action.actionType !== DAILY_BRIEF_ACTION) throw new MessagingValidationError(`Automation action ${action.id} is not ${DAILY_BRIEF_ACTION}`)
+    if (action.actionType !== BRIEF_ACTION && action.actionType !== LEGACY_DAILY_BRIEF_ACTION) throw new MessagingValidationError(`Automation action ${action.id} is not a brief preparation action`)
     if (action.status === 'cancelled') throw new MessagingValidationError('Cancelled automation action cannot create an outbound message')
     const existing = await this.store.findMessageBySourceAction(action.id)
     if (existing) return { message: existing, created: false }
-    const recipient = normalizePhone(requiredString(action.payload.recipient, 'Daily brief action is missing recipient'))
-    const text = requiredString(action.payload.text, 'Daily brief action is missing text')
-    const briefId = requiredString(action.payload.briefId, 'Daily brief action is missing briefId')
+    const recipient = normalizePhone(requiredString(action.payload.recipient, 'Brief action is missing recipient'))
+    const text = requiredString(action.payload.text, 'Brief action is missing text')
+    const briefId = requiredString(action.payload.briefId, 'Brief action is missing briefId')
+    const messageType = typeof action.payload.messageType === 'string' && BRIEF_MESSAGE_TYPES.has(action.payload.messageType) ? action.payload.messageType : 'daily_brief'
     const now = this.now()
     const message: OutboundMessage = {
       id: this.newId(), organizationId: action.organizationId, sourceActionId: action.id, channel: 'whatsapp', provider: this.provider.name, recipient,
-      messageType: DAILY_BRIEF_MESSAGE, aggregateType: action.aggregateType, aggregateId: action.aggregateId, status: 'pending', externalMessageId: null,
-      payload: { text, briefId, referenceDate: action.payload.referenceDate ?? null, source: 'operational_agent' }, providerResponse: null,
+      messageType, aggregateType: action.aggregateType, aggregateId: action.aggregateId, status: 'pending', externalMessageId: null,
+      payload: { text, briefId, briefType: action.payload.briefType ?? (messageType === 'd_minus_1_brief' ? 'd_minus_1' : 'daily'), eventId: action.payload.eventId ?? null, eventName: action.payload.eventName ?? null, referenceDate: action.payload.referenceDate ?? null, source: 'brief_engine' }, providerResponse: null,
       createdAt: now, updatedAt: now, sentAt: null, deliveredAt: null, readAt: null, failedAt: null, lastError: null,
     }
-    return this.store.createMessageWithOutbox(message, this.domainEvent(message, 'message.created', { messageId: message.id, sourceActionId: action.id, channel: message.channel, provider: message.provider, recipient: message.recipient, messageType: message.messageType, briefId }))
+    return this.store.createMessageWithOutbox(message, this.domainEvent(message, 'message.created', { messageId: message.id, sourceActionId: action.id, channel: message.channel, provider: message.provider, recipient: message.recipient, messageType: message.messageType, briefId, briefType: message.payload.briefType, eventId: message.payload.eventId }))
+  }
+
+  async prepareDailyBrief(actionId: string): Promise<{ message: OutboundMessage; created: boolean }> {
+    return this.prepareBrief(actionId)
   }
 
   async send(messageId: string): Promise<{ message: OutboundMessage; duplicate: boolean }> {

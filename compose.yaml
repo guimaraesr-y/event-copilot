@@ -99,10 +99,17 @@ services:
   # a fresh/empty local n8n instance usable with plain `docker compose up`.
   n8n-init:
     image: n8nio/n8n:2.34.0
-    entrypoint: ["/bin/sh", "-lc"]
-    command: >-
-      n8n import:workflow --input=/files/n8n/workflows/ecc-domain-event-gateway.json
-      && n8n publish:workflow --id=eccDomainEventGw1
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        set -eu
+        echo "[n8n-init] importing ECC workflow"
+        n8n import:workflow --input=/files/n8n/workflows/ecc-domain-event-gateway.json
+        echo "[n8n-init] publishing ECC workflow"
+        n8n publish:workflow --id=eccDomainEventGw1
+        echo "[n8n-init] bootstrap completed"
+    command: []
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -134,10 +141,10 @@ services:
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-development-only-change-me-32-chars}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:8080/}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: 5678
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
-      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:8080/}
       GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Sao_Paulo}
     depends_on:
       postgres:

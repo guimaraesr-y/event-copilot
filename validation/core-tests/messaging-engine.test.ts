@@ -178,5 +178,16 @@ assert(!briefDuplicate.created&&briefDuplicate.message.id===briefPrepared.messag
 const briefSent=await briefEngine.send(briefPrepared.message.id)
 assert(briefSent.message.status==='sent'&&briefProvider.calls===1,'daily brief uses standard provider send pipeline')
 
-console.log('MessagingEngine: 21/21 behavioral scenarios passed')
+const d1Store=new Store()
+d1Store.action={id:'10000000-0000-4000-8000-000000000020',organizationId:action.organizationId,actionType:'brief.prepare',status:'prepared',aggregateType:'brief',aggregateId:'10000000-0000-4000-8000-000000000021',payload:{briefId:'10000000-0000-4000-8000-000000000021',briefType:'d_minus_1',messageType:'d_minus_1_brief',eventId:'10000000-0000-4000-8000-000000000022',eventName:'Ana & Pedro',referenceDate:'2026-10-16',recipient:'+55 21 97777-6666',text:'Briefing D-1 — Ana & Pedro.'}}
+const d1Provider=new Provider();const d1Engine=new MessagingEngine({store:d1Store,provider:d1Provider,now,newId})
+const d1Prepared=await d1Engine.prepareBrief(d1Store.action.id)
+assert(d1Prepared.created&&d1Prepared.message.messageType==='d_minus_1_brief'&&d1Prepared.message.recipient==='5521977776666','D-1 brief creates standard WhatsApp outbound message with dedicated message type')
+assert(d1Prepared.message.payload.eventId==='10000000-0000-4000-8000-000000000022'&&d1Prepared.message.payload.briefType==='d_minus_1','D-1 messaging preserves event and brief metadata')
+const d1Duplicate=await d1Engine.prepareBrief(d1Store.action.id)
+assert(!d1Duplicate.created&&d1Duplicate.message.id===d1Prepared.message.id,'D-1 brief preparation is idempotent')
+const d1Sent=await d1Engine.send(d1Prepared.message.id)
+assert(d1Sent.message.status==='sent'&&d1Provider.calls===1,'D-1 brief reuses standard provider send pipeline')
+
+console.log('MessagingEngine: 25/25 behavioral scenarios passed')
 

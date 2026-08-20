@@ -186,3 +186,19 @@ console.log('OperationalAgentProvider deterministic health routing: 3/3 encoding
   assert(read.toolCalls[0]?.name==='get_daily_brief','deterministic provider routes daily brief read')
 }
 console.log('OperationalAgentProvider deterministic brief routing: 6/6 behavioral scenarios passed')
+
+{
+  const provider = new DeterministicOperationalAgentProvider()
+  const eventId='11111111-1111-4111-8111-111111111111'
+  const system:AgentProviderMessage={role:'system',content:`EVENTO ATUAL DA CONVERSA\n${eventId}`}
+  const configured=await provider.complete({messages:[system,{role:'user',content:'Configure o briefing D-1 para 18h30 no +55 21 97777-6666'}],tools})
+  assert(configured.toolCalls[0]?.name==='configure_d_minus_1_brief','deterministic provider routes D-1 schedule configuration')
+  assert(configured.toolCalls[0]?.arguments.localTime==='18:30'&&configured.toolCalls[0]?.arguments.recipient!==undefined,'deterministic provider extracts D-1 time and recipient')
+  const enabled=await provider.complete({messages:[system,{role:'user',content:'ative o briefing D-1 para 19h'}],tools})
+  assert(enabled.toolCalls[0]?.name==='configure_d_minus_1_brief'&&enabled.toolCalls[0]?.arguments.enabled===true&&enabled.toolCalls[0]?.arguments.localTime==='19:00','deterministic provider activates D-1 independently')
+  const generated=await provider.complete({messages:[system,{role:'user',content:'Gere o briefing D-1 deste evento'}],tools})
+  assert(generated.toolCalls[0]?.name==='generate_d_minus_1_brief'&&generated.toolCalls[0]?.arguments.eventId===eventId,'deterministic provider routes D-1 generation to current event')
+  const read=await provider.complete({messages:[system,{role:'user',content:'Estamos prontos para amanhã?'}],tools})
+  assert(read.toolCalls[0]?.name==='get_d_minus_1_brief'&&read.toolCalls[0]?.arguments.eventId===eventId,'deterministic provider routes readiness question to D-1 brief')
+}
+console.log('OperationalAgentProvider deterministic D-1 routing: 4/4 behavioral scenarios passed')

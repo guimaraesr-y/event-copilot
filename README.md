@@ -1,6 +1,6 @@
 # 🎛️ Event Command Center
 
-**Versão atual: 0.14.0 — Daily Command Brief**
+**Versão atual: 0.15.0 — Briefing D-1**
 
 Backend vertical para operação de eventos e cerimoniais. O ECC concentra o estado real do evento no PostgreSQL, mantém as decisões de negócio em engines determinísticas e usa IA como interface operacional — nunca como fonte de verdade.
 
@@ -8,7 +8,7 @@ Backend vertical para operação de eventos e cerimoniais. O ECC concentra o est
 
 ## 🧭 Visão geral
 
-O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências, priorização operacional por risco, Health Score explicável e Daily Command Brief agendável por organização.
+O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências, priorização operacional por risco, Health Score explicável, Daily Command Brief e Briefing D-1 agendáveis por organização.
 
 ```text
 Cerimonialista / API / WhatsApp
@@ -67,6 +67,7 @@ Change Proposals ────────────┘        ↓
 | 12 | Risk Engine | [docs/mini-feature-12.md](docs/mini-feature-12.md) |
 | 13 | Health Score | [docs/mini-feature-13.md](docs/mini-feature-13.md) |
 | 14 | Daily Command Brief + agendamento | [docs/mini-feature-14.md](docs/mini-feature-14.md) |
+| 15 | Briefing D-1 + readiness + agenda por evento | [docs/mini-feature-15.md](docs/mini-feature-15.md) |
 
 Áudio/voice input permanece no backlog.
 
@@ -200,12 +201,27 @@ CLI local:
 bun scripts/operational-agent-chat.ts --organization <ORGANIZATION_UUID>
 ```
 
+## 🌙 Briefing D-1
+
+A Feature 15 reutiliza o Brief Engine para responder **“estamos prontos para amanhã?”** por evento. O backend gera um checklist determinístico com `READY`, `READY_WITH_WARNINGS` ou `NOT_READY`, cronograma de fornecedores, riscos, tarefas, milestones, dependências, mudanças e Inbox.
+
+O schedule D-1 é independente do Daily Brief e pode ser configurado pelo Operational Agent. Na véspera, o worker gera uma única revisão agendada por evento e publica `brief.delivery_requested`; n8n e Messaging Engine reutilizam o mesmo pipeline de WhatsApp com `message_type=d_minus_1_brief`.
+
+Detalhes: [docs/mini-feature-15.md](docs/mini-feature-15.md).
+
 ## 🚀 Desenvolvimento local
 
 ```bash
 cp .env.example .env
 docker compose up --build -d
 bun packages/database/src/migrate.ts
+```
+
+O Compose possui um serviço one-shot `n8n-init`: em uma instância nova ou vazia ele importa e publica o `ECC Domain Event Gateway` antes de iniciar o runtime do n8n. O container `n8n-init` terminar em `Exited (0)` é o comportamento esperado.
+
+Ao editar `n8n/workflows/ecc-domain-event-gateway.json` com o stack já em execução, faça o redeploy explícito sem recriar volumes:
+
+```bash
 ./scripts/n8n-sync.sh
 ```
 
@@ -276,8 +292,8 @@ validation/              cenários comportamentais
 12 Risk Engine             ✅
 13 Health Score            ✅
 14 Daily Command Brief     ✅
-15 Briefing D-1            próxima
-16 Event Day Mode
+15 Briefing D-1            ✅
+16 Event Day Mode           próxima
 17 Dashboard
 
 Backlog

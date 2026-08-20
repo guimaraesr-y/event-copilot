@@ -403,11 +403,27 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
+    const dMinus1Term=/\b(d-?1|dia anterior|vespera|briefing de vespera|briefing do dia anterior)\b/.test(normalized)
+    if (dMinus1Term && /\b(qual|que)\b.*\b(horario|hora)\b|\b(configuracao|configuracoes)\b/.test(normalized)) return toolResponse('get_d_minus_1_settings', {})
+    if (dMinus1Term && /configur|horario|hora|ativ|desativ|mande|envie|sempre|todos os eventos/.test(normalized)) {
+      const args:Record<string,unknown>={}
+      if(/desativ|deslig|desabilit/.test(normalized))args.enabled=false
+      else if(/\b(ativ\w*|habilit\w*|ligue|mande|envie|quero receber)\b/.test(normalized)||/todos os eventos|sempre/.test(normalized))args.enabled=true
+      const localTime=extractDeterministicBriefTime(normalized);if(localTime)args.localTime=localTime
+      const phone=user.match(/\+?\d[\d ()-]{8,20}\d/)?.[0];if(phone)args.recipient=phone
+      return toolResponse('configure_d_minus_1_brief',args)
+    }
+    if (dMinus1Term && /gere|gerar|refaca|recrie|monte/.test(normalized)) {
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('generate_d_minus_1_brief',{eventId})
+    }
+    if (dMinus1Term || /pronto.*amanha|amanha.*pronto|como esta.*amanha/.test(normalized)) {
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('get_d_minus_1_brief',{eventId})
+    }
     if (/\b(qual|que)\b.*\b(horario|hora)\b.*\b(brief|resumo)\b|\b(brief|resumo)\b.*\b(qual|que)\b.*\b(horario|hora)\b|\b(configuracao|configuracoes)\b.*\b(brief|resumo)\b/.test(normalized)) return toolResponse('get_daily_brief_settings', {})
     if (/configur|horario|hora|ativ|desativ|todo dia|todos os dias|diario|diariamente/.test(normalized) && /brief|resumo/.test(normalized)) {
       const args:Record<string,unknown>={}
       if(/desativ|deslig|desabilit/.test(normalized))args.enabled=false
-      else if(/\b(ativ|habilit|ligue|mande|envie|quero receber)\b/.test(normalized)||/\b(todo dia|todos os dias|diariamente)\b/.test(normalized))args.enabled=true
+      else if(/\b(ativ\w*|habilit\w*|ligue|mande|envie|quero receber)\b/.test(normalized)||/\b(todo dia|todos os dias|diariamente)\b/.test(normalized))args.enabled=true
       const localTime=extractDeterministicBriefTime(normalized)
       if(localTime)args.localTime=localTime
       const phone=user.match(/\+?\d[\d ()-]{8,20}\d/)?.[0]

@@ -257,13 +257,37 @@ const TOOLS: AgentToolDefinition[] = [
     }),
   },
   {
+    name: 'get_d_minus_1_brief',
+    description: 'Get the latest deterministic D-1 readiness briefing for one event. Use for questions such as are we ready for tomorrow, D-1 status, final checklist or tomorrow operational timeline.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'generate_d_minus_1_brief',
+    description: 'Generate a fresh D-1 readiness briefing for one event. Only call when the CURRENT user explicitly asks to generate/rebuild the D-1/day-before briefing.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'get_d_minus_1_settings',
+    description: 'Read the organization D-1 briefing schedule: enabled state, local delivery time and WhatsApp recipient.',
+    parameters: emptyObjectSchema(),
+  },
+  {
+    name: 'configure_d_minus_1_brief',
+    description: 'Change D-1 briefing schedule settings. Only call when the CURRENT user explicitly asks to enable/disable the briefing sent on the day before an event, change its time, or change its WhatsApp recipient.',
+    parameters: objectSchema({
+      enabled: { type: 'boolean', description: 'Optional. True only on explicit activation; false only on explicit disable. Omit when unchanged.' },
+      localTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: 'Optional organization-local HH:mm delivery time.' },
+      recipient: { type: 'string', description: 'Optional WhatsApp recipient phone.' },
+    }),
+  },
+  {
     name: 'acknowledge_risk',
     description: 'Mark a current risk as acknowledged/seen without resolving its underlying cause. Only call when the CURRENT user explicitly says they are aware of that risk.',
     parameters: objectSchema({ riskId: stringSchema('Exact risk UUID from a risk tool result.') }, ['riskId']),
   },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health','generate_daily_brief','configure_daily_brief'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health','generate_daily_brief','configure_daily_brief','generate_d_minus_1_brief','configure_d_minus_1_brief'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -334,10 +358,11 @@ export class OperationalAgent {
       const pendingProposals = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, status: 'proposed', requestedBySender: sender, limit: 10 })
       const openDependencies = await this.deps.dependencyEngine.list({ organizationId: input.organizationId, status: 'open', limit: 30 })
       const briefPreference = await this.deps.briefEngine.getPreference(input.organizationId)
+      const dMinus1Schedule = await this.deps.briefEngine.getSchedule(input.organizationId,'d_minus_1')
 
       const messages: AgentProviderMessage[] = [
         { role: 'system', content: buildSystemPrompt(input.organizationTimezone, startedAt) },
-        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals, openDependencies, briefPreference) },
+        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals, openDependencies, briefPreference, dMinus1Schedule) },
         ...history.flatMap((turn): AgentProviderMessage[] => turn.assistantText ? [
           { role: 'user', content: turn.userText },
           { role: 'assistant', content: turn.assistantText },
@@ -686,6 +711,42 @@ export class OperationalAgent {
         })
         return {reply:`Daily Brief ${pref.enabled?'ativado':'desativado'}${pref.enabled?` para ${pref.localTime} (${input.organizationTimezone})`:''}.`,settings:serializeBriefPreferenceForAgent(pref)}
       }
+      case 'get_d_minus_1_brief': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const brief=await this.deps.briefEngine.getDMinus1(input.organizationId,event.id)
+        return {brief:serializeOperationalBriefForAgent(brief)}
+      }
+      case 'generate_d_minus_1_brief': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        if(!isExplicitDMinus1Generation(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to generate the D-1 brief')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const result=await this.deps.briefEngine.generateDMinus1({organizationId:input.organizationId,eventId:event.id,triggerType:'agent',triggerKey:`agent:${turnId}:${toolIndex}:d-minus-1`,generatedBySender:input.sender})
+        return {reply:`Briefing D-1 de ${event.name} gerado: ${readinessLabel(result.brief.summary.readiness)} · Health ${result.brief.summary.event.healthScore}/100.`,duplicate:result.duplicate,brief:serializeOperationalBriefForAgent(result.brief)}
+      }
+      case 'get_d_minus_1_settings': {
+        assertNoUnexpectedKeys(call.arguments,[])
+        const schedule=await this.deps.briefEngine.getSchedule(input.organizationId,'d_minus_1')
+        return {settings:serializeBriefScheduleForAgent(schedule)}
+      }
+      case 'configure_d_minus_1_brief': {
+        assertNoUnexpectedKeys(call.arguments,['enabled','localTime','recipient'])
+        const pendingRecipientActivation=isPendingBriefRecipientActivation(history,'configure_d_minus_1_brief')
+        const recipientContinuation=pendingRecipientActivation&&extractPhone(input.text)!==undefined
+        if(!isExplicitDMinus1Configuration(input.text)&&!recipientContinuation) throw new OperationalAgentValidationError('Current user message does not explicitly ask to configure the D-1 brief')
+        const current=await this.deps.briefEngine.getSchedule(input.organizationId,'d_minus_1')
+        const patch=resolveBriefConfiguration(input.text,call.arguments,{completePendingActivation:recipientContinuation})
+        if(patch.enabled===undefined&&/\b(configure|configurar)\b/.test(normalizeDecisionText(input.text))) patch.enabled=true
+        if(patch.enabled===undefined&&patch.localTime===undefined&&patch.recipient===undefined) throw new OperationalAgentValidationError('configure_d_minus_1_brief requires at least one setting')
+        const senderRecipient=whatsAppRecipientFromSender(input.sender)
+        const effectiveRecipient=patch.recipient!==undefined?patch.recipient:current.recipient
+        if(patch.enabled===true&&!effectiveRecipient&&!senderRecipient){
+          const schedule=await this.deps.briefEngine.configureSchedule({organizationId:input.organizationId,type:'d_minus_1',...(patch.localTime!==undefined?{localTime:patch.localTime}:{}),...(patch.recipient!==undefined?{recipient:patch.recipient}:{}),updatedBySender:input.sender})
+          return {reply:`Horário do Briefing D-1 salvo para ${schedule.localTime} (${input.organizationTimezone}). Para ativar o envio na véspera, informe o número de WhatsApp que deve receber o briefing.`,needsRecipient:true,settings:serializeBriefScheduleForAgent(schedule)}
+        }
+        const schedule=await this.deps.briefEngine.configureSchedule({organizationId:input.organizationId,type:'d_minus_1',...(patch.enabled!==undefined?{enabled:patch.enabled}:{}),...(patch.localTime!==undefined?{localTime:patch.localTime}:{}),...(patch.recipient!==undefined?{recipient:patch.recipient}:{}),updatedBySender:input.sender,fallbackRecipient:senderRecipient})
+        return {reply:`Briefing D-1 ${schedule.enabled?'ativado':'desativado'}${schedule.enabled?` para ${schedule.localTime} (${input.organizationTimezone})`:''}.`,settings:serializeBriefScheduleForAgent(schedule)}
+      }
       case 'acknowledge_risk': {
         assertNoUnexpectedKeys(call.arguments,['riskId'])
         if(!isExplicitRiskAcknowledgement(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly acknowledge the risk')
@@ -762,15 +823,16 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
   return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.
-17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.\n18. Se o turno anterior pediu especificamente o número de WhatsApp para concluir a ativação do Daily Brief, uma resposta curta contendo apenas o número (por exemplo "envie para 21999999999") é continuação válida: use configure_daily_brief com recipient e não exija que o usuário repita "brief diário".`
+17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.\n18. Se o turno anterior pediu especificamente o número de WhatsApp para concluir a ativação do Daily Brief, uma resposta curta contendo apenas o número (por exemplo "envie para 21999999999") é continuação válida: use configure_daily_brief com recipient e não exija que o usuário repita "brief diário".\n19. Briefing D-1 é específico por evento e representa prontidão para a véspera. Use get_d_minus_1_brief para readiness/checklist/cronograma, generate_d_minus_1_brief somente com pedido explícito, e configure_d_minus_1_brief para o horário/ativação do envio na véspera. Readiness é calculado deterministicamente pelo backend; nunca invente READY/NOT_READY.\n20. O Daily Brief e o D-1 possuem agendas independentes. Nunca altere uma agenda quando o usuário estiver falando da outra. Se a ativação do D-1 estiver aguardando destinatário, uma resposta curta com telefone pode continuar configure_d_minus_1_brief.`
 }
 
-function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[], briefPreference: import('@ecc/domain').BriefPreference): string {
+function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[], briefPreference: import('@ecc/domain').BriefPreference, dMinus1Schedule: import('@ecc/domain').BriefSchedule): string {
   const catalog = events.slice(0, 50).map((event) => ({ id: event.id, name: event.name, type: event.type, startAt: event.startAt.toISOString(), status: event.status }))
   const proposals = pendingProposals.slice(0, 10).map((value) => ({ id: value.proposal.id, eventId: value.proposal.eventId, type: value.proposal.type, currentValue: value.proposal.currentValue, proposedValue: value.proposal.proposedValue, createdAt: value.proposal.createdAt.toISOString() }))
   const dependencies = openDependencies.slice(0, 30).map(serializeDependencyForAgent)
   const brief = { enabled:briefPreference.enabled, localTime:briefPreference.localTime, channel:briefPreference.channel, recipientConfigured:!!briefPreference.recipient }
-  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nDEPENDÊNCIAS ABERTAS\n${JSON.stringify(dependencies)}\n\nCONFIGURAÇÃO ATUAL DO DAILY BRIEF\n${JSON.stringify(brief)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal/dependency IDs são internos e servem apenas para tools.`
+  const dMinus1 = { enabled:dMinus1Schedule.enabled, localTime:dMinus1Schedule.localTime, channel:dMinus1Schedule.channel, recipientConfigured:!!dMinus1Schedule.recipient }
+  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nDEPENDÊNCIAS ABERTAS\n${JSON.stringify(dependencies)}\n\nCONFIGURAÇÃO ATUAL DO DAILY BRIEF\n${JSON.stringify(brief)}\n\nCONFIGURAÇÃO ATUAL DO BRIEFING D-1\n${JSON.stringify(dMinus1)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal/dependency IDs são internos e servem apenas para tools.`
 }
 
 function requireEvent(events: Event[], eventId: string): Event {
@@ -853,13 +915,23 @@ function serializeHealthEvaluationForAgent(value: import('@ecc/domain').EventHea
 function isExplicitHealthEvaluation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar|avalie|avaliar).*(saude|health|score)\b|\b(saude|health|score).*(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar)\b/.test(n) }
 function healthLabel(status: import('@ecc/domain').HealthStatus): string { return status==='excellent'?'excelente':status==='good'?'bom':status==='attention'?'atenção':'crítico' }
 
-function serializeBriefForAgent(value: import('@ecc/domain').DailyBrief) { return { id:value.id,referenceDate:value.referenceDate,revision:value.revision,status:value.status,summary:value.summary,renderedText:value.renderedText,generatedAt:value.generatedAt.toISOString(),deliveryRequestedAt:value.deliveryRequestedAt?.toISOString()??null } }
+function serializeBriefForAgent(value: import('@ecc/domain').DailyBrief) { return serializeOperationalBriefForAgent(value) }
+function serializeOperationalBriefForAgent(value: import('@ecc/domain').OperationalBrief) { return { id:value.id,type:value.type,eventId:value.eventId,referenceDate:value.referenceDate,revision:value.revision,status:value.status,summary:value.summary,renderedText:value.renderedText,generatedAt:value.generatedAt.toISOString(),deliveryRequestedAt:value.deliveryRequestedAt?.toISOString()??null } }
+function serializeBriefScheduleForAgent(value: import('@ecc/domain').BriefSchedule) { return { type:value.type,enabled:value.enabled,localTime:value.localTime,channel:value.channel,recipient:value.recipient,updatedBySender:value.updatedBySender,updatedAt:value.updatedAt.toISOString() } }
+function readinessLabel(value: import('@ecc/domain').EventReadinessStatus){return value==='READY'?'pronto':value==='READY_WITH_WARNINGS'?'pronto com alertas':'não pronto'}
 function serializeBriefPreferenceForAgent(value: import('@ecc/domain').BriefPreference) { return { enabled:value.enabled,localTime:value.localTime,channel:value.channel,recipient:value.recipient,updatedBySender:value.updatedBySender,updatedAt:value.updatedAt.toISOString() } }
-function isExplicitBriefGeneration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(gere|gerar|gera|monte|montar|refaca|refazer|recrie|recriar).*(brief|resumo).*(hoje|diario|daily)?\b|\b(brief|resumo).*(gere|gerar|refaca|atualize)\b/.test(n) }
+function isExplicitBriefGeneration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(gere|gerar|gera|monte|montar|refaca|refazer|recrie|recriar).*(brief|briefing|resumo).*(hoje|diario|daily)?\b|\b(brief|briefing|resumo).*(gere|gerar|refaca|atualize)\b/.test(n) }
 function isExplicitBriefConfiguration(text:string):boolean {
   const n=normalizeDecisionText(text)
-  return /\b(brief|resumo).*(ativ|desativ|horario|hora|todo dia|todos os dias|diario|diariamente|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere|habilite|desligue).*(brief|resumo)\b/.test(n)
+  return /\b(brief|briefing|resumo).*(ativ|desativ|horario|hora|todo dia|todos os dias|diario|diariamente|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere|habilite|desligue).*(brief|briefing|resumo)\b/.test(n)
     || (/\b(whatsapp|numero|telefone)\b/.test(n)&&extractPhone(text)!==undefined)
+}
+function isExplicitDMinus1Generation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(gere|gerar|monte|montar|refaca|refazer|recrie|recriar).*(d-?1|dia anterior|vespera|briefing)|\b(d-?1|dia anterior|vespera).*(gere|gerar|monte|refaca)\b/.test(n) }
+function isExplicitDMinus1Configuration(text:string):boolean {
+  const n=normalizeDecisionText(text)
+  const d1=/\b(d-?1|dia anterior|vespera|briefing de vespera|briefing do dia anterior)\b/.test(n)
+  const config=/\b(ativ\w*|desativ\w*|configur\w*|mude|altere|horario|hora|mande|envie|whatsapp|numero)\b/.test(n)
+  return (d1&&config) || (d1&&/\b(todo evento|todos os eventos|sempre)\b/.test(n))
 }
 function resolveBriefConfiguration(text:string,args:Record<string,unknown>,options:{completePendingActivation?:boolean}={}):{enabled?:boolean;localTime?:string;recipient?:string|null}{
   const enabledIntent=options.completePendingActivation?true:briefEnabledIntent(text)
@@ -872,18 +944,18 @@ function resolveBriefConfiguration(text:string,args:Record<string,unknown>,optio
     ...(recipient!==undefined?{recipient}:{}),
   }
 }
-function isPendingBriefRecipientActivation(history:AgentTurn[]):boolean{
+function isPendingBriefRecipientActivation(history:AgentTurn[],toolName='configure_daily_brief'):boolean{
   const previous=history.at(-1)
   if(!previous)return false
-  const lastConfigure=[...previous.toolTrace].reverse().find(entry=>entry.name==='configure_daily_brief')
+  const lastConfigure=[...previous.toolTrace].reverse().find(entry=>entry.name===toolName)
   return lastConfigure?.result?.needsRecipient===true
 }
 function briefEnabledIntent(text:string):boolean|null{
   const n=normalizeDecisionText(text)
-  if(/\b(desativ|deslig|desabilit|pare de (?:mandar|enviar)|nao (?:mande|envie)).*(brief|resumo)\b|\b(brief|resumo).*(desativ|deslig|desabilit)\b/.test(n))return false
-  if(/\b(ativ|habilit|ligue|mande|envie|quero receber).*(brief|resumo)\b/.test(n))return true
-  if(/\b(brief|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
-  if(/\b(configure|configurar).*(brief|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
+  if(/\b(desativ|deslig|desabilit|pare de (?:mandar|enviar)|nao (?:mande|envie)).*(brief|briefing|resumo)\b|\b(brief|briefing|resumo).*(desativ|deslig|desabilit)\b/.test(n))return false
+  if(/\b(ativ|habilit|ligue|mande|envie|quero receber).*(brief|briefing|resumo)\b/.test(n))return true
+  if(/\b(brief|briefing|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
+  if(/\b(configure|configurar).*(brief|briefing|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
   return null
 }
 function extractBriefLocalTime(text:string):string|undefined{

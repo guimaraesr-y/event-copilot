@@ -5,7 +5,7 @@ import type { DomainEventGatewayRepository } from '@ecc/database'
 
 const MAX_SIGNATURE_AGE_SECONDS = 300
 const VENDOR_CONFIRMATION_ACTION = 'vendor_confirmation.prepare'
-const DAILY_BRIEF_ACTION = 'daily_brief.prepare'
+const BRIEF_ACTION = 'brief.prepare'
 
 export function registerDomainEventRoutes(app: Hono, repository: DomainEventGatewayRepository): void {
   app.post('/api/v1/internal/domain-events/verify', async (c) => {
@@ -46,16 +46,18 @@ export function registerDomainEventRoutes(app: Hono, repository: DomainEventGate
       duplicate: !result.created,
     })
   })
-  app.post('/api/v1/internal/automations/daily-brief-delivery-requested', async (c) => {
+  const prepareBriefDelivery = async (c: any) => {
     const parsed = domainEventEnvelopeSchema.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return c.json({ error: { code: 'INVALID_DOMAIN_EVENT', message: 'Invalid domain event envelope' } }, 400)
     const authError = verifySignature(c.req.header('x-ecc-timestamp'), c.req.header('x-ecc-signature'), parsed.data)
     if (authError) return c.json({ error: { code: 'INVALID_DOMAIN_EVENT_SIGNATURE', message: authError } }, 401)
     if (parsed.data.eventType !== 'brief.delivery_requested') return c.json({ error: { code: 'UNSUPPORTED_DOMAIN_EVENT', message: 'Expected brief.delivery_requested' } }, 422)
     if (!(await repository.matchesOutbox(parsed.data))) return c.json({ error: { code: 'UNKNOWN_DOMAIN_EVENT', message: 'Domain event does not match the transactional outbox' } }, 404)
-    const result = await repository.prepareAction(parsed.data, DAILY_BRIEF_ACTION)
+    const result = await repository.prepareAction(parsed.data, BRIEF_ACTION)
     return c.json({ accepted: true, actionId: result.action.id, actionType: result.action.actionType, status: result.action.status, duplicate: !result.created })
-  })
+  }
+  app.post('/api/v1/internal/automations/brief-delivery-requested', prepareBriefDelivery)
+  app.post('/api/v1/internal/automations/daily-brief-delivery-requested', prepareBriefDelivery)
 
 }
 

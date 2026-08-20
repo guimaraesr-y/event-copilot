@@ -1,4 +1,4 @@
-import type { BriefPreference, BriefStore, DailyBrief, DailyBriefSnapshot, PersistDailyBriefInput, ScheduledBriefPreference } from '../../packages/domain/src/index.ts'
+import type { BriefPreference, BriefSchedule, BriefStore, DailyBrief, DailyBriefSnapshot, PersistDailyBriefInput, PersistDMinus1BriefInput, ScheduledBriefSchedule, DMinus1Brief, DMinus1BriefSnapshot } from '../../packages/domain/src/index.ts'
 import { BriefEngine } from '../../packages/event-engine/src/brief-engine.ts'
 
 function assert(ok:unknown,msg:string):asserts ok{if(!ok)throw new Error(`Assertion failed: ${msg}`)}
@@ -20,18 +20,27 @@ const snapshot:DailyBriefSnapshot={
 }
 
 class Store implements BriefStore{
-  preference:BriefPreference={organizationId:ORG,enabled:false,localTime:'08:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixed,updatedAt:fixed}
-  scheduled:ScheduledBriefPreference[]=[]
+  dailySchedule:BriefSchedule={organizationId:ORG,type:'daily',enabled:false,localTime:'08:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixed,updatedAt:fixed}
+  d1Schedule:BriefSchedule={organizationId:ORG,type:'d_minus_1',enabled:false,localTime:'18:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixed,updatedAt:fixed}
+  scheduledSchedules:ScheduledBriefSchedule[]=[]
   briefs:DailyBrief[]=[]
+  d1Briefs:DMinus1Brief[]=[]
   outbox:any[]=[]
-  async getPreference(){return this.preference}
-  async updatePreference(input:any){this.preference={...this.preference,...('enabled'in input?{enabled:input.enabled}:{}),...('localTime'in input&&input.localTime?{localTime:input.localTime}:{}),...('recipient'in input?{recipient:input.recipient}:{}),updatedBySender:input.updatedBySender,updatedAt:input.at};return this.preference}
-  async listScheduledPreferences(){return this.scheduled}
+  async getPreference():Promise<BriefPreference>{const{type:_type,...pref}=this.dailySchedule;return pref}
+  async updatePreference(input:any){this.dailySchedule={...this.dailySchedule,...('enabled'in input?{enabled:input.enabled}:{}),...('localTime'in input&&input.localTime?{localTime:input.localTime}:{}),...('recipient'in input?{recipient:input.recipient}:{}),updatedBySender:input.updatedBySender,updatedAt:input.at};return this.getPreference()}
+  async listScheduledPreferences(){return this.scheduledSchedules.filter(x=>x.type==='daily').map(({type:_type,...x})=>x)}
+  async getSchedule(_o:string,type:'daily'|'d_minus_1'){return type==='daily'?this.dailySchedule:this.d1Schedule}
+  async updateSchedule(input:any){const key=input.type==='daily'?'dailySchedule':'d1Schedule';(this as any)[key]={...(this as any)[key],...('enabled'in input?{enabled:input.enabled}:{}),...('localTime'in input&&input.localTime?{localTime:input.localTime}:{}),...('recipient'in input?{recipient:input.recipient}:{}),updatedBySender:input.updatedBySender,updatedAt:input.at};return (this as any)[key]}
+  async listScheduledSchedules(){return this.scheduledSchedules}
   async loadDailySnapshot(o:string){return o===ORG?structuredClone(snapshot):null}
+  async loadDMinus1Snapshot(_o:string,_e:string):Promise<DMinus1BriefSnapshot|null>{return null}
   async persistDaily(input:PersistDailyBriefInput){const old=this.briefs.find(b=>b.organizationId===input.brief.organizationId&&b.triggerKey===input.brief.triggerKey);if(old)return{brief:old,duplicate:true};for(const b of this.briefs)if(b.organizationId===input.brief.organizationId&&b.referenceDate===input.brief.referenceDate&&b.status==='generated'){b.status='superseded';b.supersededAt=input.brief.generatedAt}const revision=Math.max(0,...this.briefs.filter(b=>b.referenceDate===input.brief.referenceDate).map(b=>b.revision))+1;const brief:DailyBrief={...input.brief,revision,status:'generated',supersededAt:null};this.briefs.push(brief);if(input.requestDelivery&&input.domainEvent)this.outbox.push(input.domainEvent);return{brief,duplicate:false}}
+  async persistDMinus1(_input:PersistDMinus1BriefInput):Promise<{brief:DMinus1Brief;duplicate:boolean}>{throw new Error('not used')}
   async getLatestDaily(o:string,d:string){return [...this.briefs].filter(b=>b.organizationId===o&&b.referenceDate===d&&b.status==='generated').sort((a,b)=>b.revision-a.revision)[0]??null}
-  async getById(o:string,id:string){return this.briefs.find(b=>b.organizationId===o&&b.id===id)??null}
+  async getLatestDMinus1(){return null}
+  async getById(o:string,id:string){return this.briefs.find(b=>b.organizationId===o&&b.id===id)??this.d1Briefs.find(b=>b.organizationId===o&&b.id===id)??null}
   async listDaily(o:string,limit=30){return this.briefs.filter(b=>b.organizationId===o).sort((a,b)=>b.generatedAt.getTime()-a.generatedAt.getTime()).slice(0,limit)}
+  async listDMinus1(){return this.d1Briefs}
 }
 
 const store=new Store();let seq=0
@@ -39,6 +48,7 @@ const engine=new BriefEngine({store,now:()=>fixed,newId:()=>`33333333-3333-4333-
 let checks=0
 
 let result=await engine.generateDaily({organizationId:ORG,triggerType:'manual',triggerKey:'manual:first'})
+assert(result.brief.eventId===null,'daily brief is workspace-scoped');checks++
 assert(result.brief.referenceDate==='2026-08-19','reference date uses organization timezone');checks++
 assert(result.brief.summary.overdueTasks===1&&result.brief.summary.dueTodayTasks===1,'brief separates overdue and due-today tasks');checks++
 assert(result.brief.summary.pendingVendors===1&&result.brief.summary.openDependencies===1&&result.brief.summary.pendingChanges===1,'brief summarizes vendor/dependency/change state');checks++
@@ -58,10 +68,10 @@ let rejected=false;try{await engine.configurePreference({organizationId:ORG,enab
 const configured=await engine.configurePreference({organizationId:ORG,enabled:true,localTime:'07:30',updatedBySender:'planner',fallbackRecipient:'+55 (21) 99999-9999'})
 assert(configured.enabled&&configured.localTime==='07:30'&&configured.recipient==='5521999999999','agent sender can become configured WhatsApp recipient');checks++
 
-store.scheduled=[{...configured,organizationName:'Cerimonial XPTO',timezone:'America/Sao_Paulo'}]
+store.scheduledSchedules=[{...store.dailySchedule,organizationName:'Cerimonial XPTO',timezone:'America/Sao_Paulo'}]
 const scheduled=await engine.processDueSchedules(fixed)
-assert(scheduled.generated===1&&store.outbox.at(-1)?.eventType==='brief.delivery_requested','due scheduler generates brief and durable delivery request');checks++
-assert(store.outbox.at(-1)?.payload.source==='operational_agent'&&store.outbox.at(-1)?.payload.recipient==='5521999999999','scheduled delivery identifies agent source and configured recipient');checks++
+assert(scheduled.generated===1&&scheduled.daily===1&&store.outbox.at(-1)?.eventType==='brief.delivery_requested','due scheduler generates brief and durable delivery request');checks++
+assert(store.outbox.at(-1)?.payload.source==='brief_engine'&&store.outbox.at(-1)?.payload.recipient==='5521999999999','scheduled delivery identifies brief engine source and configured recipient');checks++
 const retry=await engine.processDueSchedules(new Date('2026-08-19T11:00:00Z'))
 assert(retry.duplicates===1&&store.outbox.filter(e=>e.eventType==='brief.delivery_requested').length===1,'scheduler retry does not request duplicate morning message');checks++
 const beforeTomorrow=await engine.processDueSchedules(new Date('2026-08-20T10:29:00Z'))

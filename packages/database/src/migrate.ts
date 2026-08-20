@@ -18,6 +18,7 @@ import { migration015DependencyEngine } from './migrations/015_dependency_engine
 import { migration016RiskEngine } from './migrations/016_risk_engine.ts'
 import { migration017HealthScore } from './migrations/017_health_score.ts'
 import { migration018DailyBrief } from './migrations/018_daily_brief.ts'
+import { migration019DMinus1Brief } from './migrations/019_d_minus_1_brief.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -43,6 +44,7 @@ const migrator = new Migrator({
         '016_risk_engine': migration016RiskEngine,
         '017_health_score': migration017HealthScore,
         '018_daily_brief': migration018DailyBrief,
+        '019_d_minus_1_brief': migration019DMinus1Brief,
       }
     },
   },

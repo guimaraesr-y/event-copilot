@@ -229,7 +229,7 @@
         "options": {}
       },
       "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc010",
-      "name": "Is Daily Brief Delivery Requested?",
+      "name": "Is Brief Delivery Requested?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -240,7 +240,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://api:3000/api/v1/internal/automations/daily-brief-delivery-requested",
+        "url": "http://api:3000/api/v1/internal/automations/brief-delivery-requested",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -261,7 +261,7 @@
         "options": {}
       },
       "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc011",
-      "name": "Prepare Daily Brief",
+      "name": "Prepare Brief",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -272,11 +272,11 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ 'http://api:3000/api/v1/internal/automation-actions/' + $json.actionId + '/daily-brief-message' }}",
+        "url": "={{ 'http://api:3000/api/v1/internal/automation-actions/' + $json.actionId + '/brief-message' }}",
         "options": {}
       },
       "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc012",
-      "name": "Create Daily Brief Message",
+      "name": "Create Brief Message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -291,7 +291,7 @@
         "options": {}
       },
       "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc013",
-      "name": "Send Daily Brief Message",
+      "name": "Send Brief Message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -335,7 +335,7 @@
         ],
         [
           {
-            "node": "Is Daily Brief Delivery Requested?",
+            "node": "Is Brief Delivery Requested?",
             "type": "main",
             "index": 0
           }
@@ -382,11 +382,11 @@
         ]
       ]
     },
-    "Is Daily Brief Delivery Requested?": {
+    "Is Brief Delivery Requested?": {
       "main": [
         [
           {
-            "node": "Prepare Daily Brief",
+            "node": "Prepare Brief",
             "type": "main",
             "index": 0
           }
@@ -400,22 +400,22 @@
         ]
       ]
     },
-    "Prepare Daily Brief": {
+    "Prepare Brief": {
       "main": [
         [
           {
-            "node": "Create Daily Brief Message",
+            "node": "Create Brief Message",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Create Daily Brief Message": {
+    "Create Brief Message": {
       "main": [
         [
           {
-            "node": "Send Daily Brief Message",
+            "node": "Send Brief Message",
             "type": "main",
             "index": 0
           }

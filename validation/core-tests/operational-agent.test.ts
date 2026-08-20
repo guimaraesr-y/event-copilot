@@ -89,6 +89,11 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
     if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
+    if(user.includes('Configure o briefing D-1')) return tool('configure_d_minus_1_brief',{enabled:true,localTime:'18:30',recipient:'+5521977776666'})
+    if(user.includes('ative o briefing D-1 para 19h')) return tool('configure_d_minus_1_brief',{enabled:'true',localTime:'19:00'})
+    if(user.includes('envie para 21996660000')) return tool('configure_d_minus_1_brief',{recipient:'21996660000'})
+    if(user.includes('Qual o briefing D-1')||user.includes('Estamos prontos para amanhã')) return tool('get_d_minus_1_brief',{eventId:ANA})
+    if(user.includes('Gere o briefing D-1')) return tool('generate_d_minus_1_brief',{eventId:ANA})
     if(user.includes('configure meu brief diario pa 21h50')) return tool('configure_daily_brief',{enabled:false,localTime:'21:00'})
     if(user.includes('ative meu brief diario')) return tool('configure_daily_brief',{enabled:'true'})
     if(user.includes('mude apenas o horario do brief diario')) return tool('configure_daily_brief',{enabled:'true',localTime:'22:10'})
@@ -117,8 +122,23 @@ const provider=new ScriptedProvider()
 const dependencyEngine={async list(){return[]},async get(){throw new Error('dependency not configured in legacy agent test')},async applySuggestion(){throw new Error('dependency not configured')},async applySuggestionsForProposal(){return{impacts:[],applied:0,duplicates:0,failed:[],reply:'0 ajuste(s) de dependência aplicado(s).'}},async resolveReview(){throw new Error('dependency not configured')}} as any
 const riskEngine={async list(){return[]},async workspaceSummary(){return[]},async evaluateEvent(){return{risks:[],detected:0,updated:0,resolved:0,duplicate:false}},async get(){throw new Error('risk not configured')},async acknowledge(){throw new Error('risk not configured')}} as any
 const healthEngine={async getCurrent(_o:string,eventId:string){const e=es.events.find(x=>x.id===eventId)!;return{event:e,score:e.healthScore,status:'excellent',breakdown:null,evaluatedAt:null,delta:null}},async workspace(){return[]},async evaluateEvent(){return{evaluation:{score:100,status:'excellent',previousScore:100,delta:0,breakdown:{},evaluatedAt:fixedNow},duplicate:false,changed:false}}} as any
-const briefState:any={preference:{organizationId:'org-1',enabled:false,localTime:'08:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixedNow,updatedAt:fixedNow},brief:{id:'brief-1',organizationId:'org-1',type:'daily',referenceDate:'2026-08-17',revision:1,status:'generated',triggerType:'agent',triggerKey:'test',summary:{referenceDate:'2026-08-17',timezone:'America/Sao_Paulo',activeEvents:2,criticalEvents:0,attentionEvents:0,overdueTasks:1,dueTodayTasks:1,pendingVendors:0,openDependencies:0,pendingChanges:0,openInbox:0,events:[],priorities:[{rank:1,type:'task',eventId:ANA,eventName:'Ana & Pedro',sourceId:'task-1',severity:'high',score:80,title:'Confirmar buffet',reason:'Tarefa atrasada'}]},renderedText:'Bom dia! Prioridade: confirmar buffet.',generatedBySender:'planner',generatedAt:fixedNow,supersededAt:null,deliveryRequestedAt:null}}
-const briefEngine={async getToday(){return briefState.brief},async list(){return[briefState.brief]},async getPreference(){return briefState.preference},async configurePreference(input:any){briefState.preference={...briefState.preference,...input,organizationId:'org-1',channel:'whatsapp',createdAt:fixedNow,updatedAt:fixedNow};return briefState.preference},async generateDaily(){return{brief:briefState.brief,duplicate:false}}} as any
+const briefState:any={
+  preference:{organizationId:'org-1',enabled:false,localTime:'08:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixedNow,updatedAt:fixedNow},
+  dMinus1Schedule:{organizationId:'org-1',type:'d_minus_1',enabled:false,localTime:'18:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixedNow,updatedAt:fixedNow},
+  brief:{id:'brief-1',organizationId:'org-1',type:'daily',eventId:null,referenceDate:'2026-08-17',revision:1,status:'generated',triggerType:'agent',triggerKey:'test',summary:{referenceDate:'2026-08-17',timezone:'America/Sao_Paulo',activeEvents:2,criticalEvents:0,attentionEvents:0,overdueTasks:1,dueTodayTasks:1,pendingVendors:0,openDependencies:0,pendingChanges:0,openInbox:0,events:[],priorities:[{rank:1,type:'task',eventId:ANA,eventName:'Ana & Pedro',sourceId:'task-1',severity:'high',score:80,title:'Confirmar buffet',reason:'Tarefa atrasada'}]},renderedText:'Bom dia! Prioridade: confirmar buffet.',generatedBySender:'planner',generatedAt:fixedNow,supersededAt:null,deliveryRequestedAt:null},
+  dMinus1:{id:'brief-d1-1',organizationId:'org-1',type:'d_minus_1',eventId:ANA,referenceDate:'2026-10-16',revision:1,status:'generated',triggerType:'agent',triggerKey:'d1-test',summary:{referenceDate:'2026-10-16',timezone:'America/Sao_Paulo',readiness:'READY_WITH_WARNINGS',readinessReasons:['1 fornecedor ainda precisa de confirmação'],event:{eventId:ANA,eventName:'Ana & Pedro',startAt:'2026-10-17T20:00:00.000Z',endAt:'2026-10-18T02:00:00.000Z',venueName:'Casa A',venueAddress:null,guestCount:120,healthScore:82,healthStatus:'good'},counts:{activeRisks:1,criticalRisks:0,highRisks:1,openTasks:1,overdueTasks:0,criticalOpenTasks:0,openMilestones:0,confirmedVendors:1,pendingVendors:1,declinedVendors:0,openDependencies:0,pendingChanges:0,openInbox:0},risks:[],tasks:[],milestones:[],vendors:[],dependencies:[],changes:[],inbox:[],timeline:[]},renderedText:'Briefing D-1 — Ana & Pedro. Pronto com alertas.',generatedBySender:'planner',generatedAt:fixedNow,supersededAt:null,deliveryRequestedAt:null}
+}
+const briefEngine={
+  async getToday(){return briefState.brief},async list(){return[briefState.brief]},
+  async getPreference(){return briefState.preference},
+  async configurePreference(input:any){briefState.preference={...briefState.preference,...input,organizationId:'org-1',channel:'whatsapp',createdAt:fixedNow,updatedAt:fixedNow};return briefState.preference},
+  async getSchedule(_o:string,type:string){return type==='d_minus_1'?briefState.dMinus1Schedule:{...briefState.preference,type:'daily'}},
+  async configureSchedule(input:any){if(input.type==='d_minus_1'){briefState.dMinus1Schedule={...briefState.dMinus1Schedule,...input,organizationId:'org-1',channel:'whatsapp',createdAt:fixedNow,updatedAt:fixedNow};return briefState.dMinus1Schedule}briefState.preference={...briefState.preference,...input,organizationId:'org-1',channel:'whatsapp',createdAt:fixedNow,updatedAt:fixedNow};return{...briefState.preference,type:'daily'}},
+  async generateDaily(){return{brief:briefState.brief,duplicate:false}},
+  async getDMinus1(){return briefState.dMinus1},
+  async generateDMinus1(){return{brief:briefState.dMinus1,duplicate:false}},
+  async listDMinus1(){return[briefState.dMinus1]}
+} as any
 const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,briefEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
@@ -228,6 +248,31 @@ let createdTurnId=''
   assert(r.turn.toolTrace[0]?.name==='generate_daily_brief'&&r.turn.modelCalls===1,'agent explicitly generates Daily Brief without second model call')
 }
 {
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Qual o briefing D-1 deste evento?',idempotencyKey:'agent-d1-read'})
+  assert(r.turn.toolTrace[0]?.name==='get_d_minus_1_brief'&&r.turn.modelCalls===2,'agent reads deterministic D-1 briefing through event-scoped tool')
+}
+{
+  const dailyBefore={...briefState.preference}
+  const r=await agent.chat({...base,text:'Configure o briefing D-1 para 18h30 no +55 21 97777-6666',idempotencyKey:'agent-d1-config'})
+  assert(r.turn.toolTrace[0]?.name==='configure_d_minus_1_brief'&&briefState.dMinus1Schedule.enabled&&briefState.dMinus1Schedule.localTime==='18:30','agent explicitly configures independent D-1 schedule')
+  assert(briefState.preference.enabled===dailyBefore.enabled&&briefState.preference.localTime===dailyBefore.localTime&&briefState.preference.recipient===dailyBefore.recipient,'D-1 configuration never mutates Daily Brief schedule')
+}
+{
+  briefState.dMinus1Schedule={...briefState.dMinus1Schedule,enabled:false,localTime:'18:00',recipient:null}
+  const r=await agent.chat({...base,text:'ative o briefing D-1 para 19h',idempotencyKey:'agent-d1-needs-recipient'})
+  assert(r.turn.toolTrace[0]?.name==='configure_d_minus_1_brief'&&!briefState.dMinus1Schedule.enabled&&briefState.dMinus1Schedule.localTime==='19:00','D-1 activation without recipient saves time without enabling delivery')
+  assert(r.reply.includes('informe o número de WhatsApp'),'D-1 activation asks for missing WhatsApp recipient')
+}
+{
+  const r=await agent.chat({...base,text:'envie para 21996660000',idempotencyKey:'agent-d1-recipient-continuation'})
+  assert(r.turn.toolTrace[0]?.name==='configure_d_minus_1_brief','phone-only follow-up continues pending D-1 recipient configuration')
+  assert(briefState.dMinus1Schedule.enabled&&briefState.dMinus1Schedule.localTime==='19:00'&&briefState.dMinus1Schedule.recipient==='21996660000','D-1 pending recipient continuation completes activation')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Gere o briefing D-1 deste evento',idempotencyKey:'agent-d1-generate'})
+  assert(r.turn.toolTrace[0]?.name==='generate_d_minus_1_brief'&&r.turn.modelCalls===1,'explicit D-1 generation uses deterministic reply without second model call')
+}
+{
   const {turn}=await as.createTurnIfAbsent({id:'stuck-turn',organizationId:'org-1',sender:'planner',idempotencyKey:'stuck-key',userText:'Como estão meus eventos?',provider:'ollama',model:'fake',now:fixedNow})
   await as.updateTurn('org-1',turn.id,{status:'processing',updatedAt:fixedNow})
   let conflict=false
@@ -235,4 +280,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 21/21 behavioral scenarios passed')
+console.log('OperationalAgent: 26/26 behavioral scenarios passed')
