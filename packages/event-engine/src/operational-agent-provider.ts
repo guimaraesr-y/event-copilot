@@ -403,6 +403,20 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
+    if (/configur|horario|hora|ativ|desativ|todo dia|diario/.test(normalized) && /brief|resumo/.test(normalized)) {
+      const timeMatch=normalized.match(/(?:as|para|pras?|horario)?\s*(\d{1,2})(?::(\d{2}))?h?(?:\b|$)/)
+      const args:Record<string,unknown>={}
+      if(/desativ/.test(normalized))args.enabled=false
+      else if(/ativ|todo dia|diario|mande|envie/.test(normalized))args.enabled=true
+      if(timeMatch)args.localTime=`${String(Number(timeMatch[1])).padStart(2,'0')}:${timeMatch[2]??'00'}`
+      const phone=user.match(/\+?\d[\d ()-]{8,20}\d/)?.[0]
+      if(phone)args.recipient=phone
+      return toolResponse('configure_daily_brief',args)
+    }
+    if (/gere|gerar|refaca|recrie|atualize/.test(normalized) && /brief|resumo/.test(normalized)) return toolResponse('generate_daily_brief', {})
+    if (/historico/.test(normalized) && /brief|resumo/.test(normalized)) return toolResponse('get_brief_history', { limit: 10 })
+    if (/configuracao|configuracoes|que horas|horario/.test(normalized) && /brief|resumo/.test(normalized)) return toolResponse('get_daily_brief_settings', {})
+    if (/brief|prioridades.*hoje|o que.*hoje|resumo.*hoje/.test(normalized)) return toolResponse('get_daily_brief', {})
     if (healthTerm && (/qual.*evento.*(?:sa(?:u|\uFFFD)de|health)|health.*workspace|sa(?:u|\uFFFD)de.*eventos|eventos.*sa(?:u|\uFFFD)de/.test(normalized))) return toolResponse('get_workspace_health', { limit: 10 })
     if (healthTerm && /reaval|recalcul|atualiz/.test(normalized)) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)

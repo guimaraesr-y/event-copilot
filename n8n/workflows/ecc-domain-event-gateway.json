@@ -203,6 +203,101 @@
         380,
         60
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0743fd14-53bd-4661-ab23-cef89cf30003",
+              "leftValue": "={{ $('Domain Event Webhook').item.json.body.eventType }}",
+              "rightValue": "brief.delivery_requested",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc010",
+      "name": "Is Daily Brief Delivery Requested?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        120,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://api:3000/api/v1/internal/automations/daily-brief-delivery-requested",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ecc-timestamp",
+              "value": "={{ $('Domain Event Webhook').item.json.headers['x-ecc-timestamp'] }}"
+            },
+            {
+              "name": "x-ecc-signature",
+              "value": "={{ $('Domain Event Webhook').item.json.headers['x-ecc-signature'] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($('Domain Event Webhook').item.json.body) }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc011",
+      "name": "Prepare Daily Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        380,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api:3000/api/v1/internal/automation-actions/' + $json.actionId + '/daily-brief-message' }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc012",
+      "name": "Create Daily Brief Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'http://api:3000/api/v1/internal/outbound-messages/' + $json.message.id + '/send' }}",
+        "options": {}
+      },
+      "id": "c12d04bb-2a88-4efb-bddf-dcb2fb7bc013",
+      "name": "Send Daily Brief Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        100
+      ]
     }
   ],
   "pinData": {},
@@ -240,7 +335,7 @@
         ],
         [
           {
-            "node": "Is Supplier Inbound Message?",
+            "node": "Is Daily Brief Delivery Requested?",
             "type": "main",
             "index": 0
           }
@@ -281,6 +376,46 @@
         [
           {
             "node": "Acknowledge Unhandled Domain Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Daily Brief Delivery Requested?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Daily Brief",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Supplier Inbound Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Daily Brief": {
+      "main": [
+        [
+          {
+            "node": "Create Daily Brief Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Daily Brief Message": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Brief Message",
             "type": "main",
             "index": 0
           }

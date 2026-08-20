@@ -1,9 +1,9 @@
 import { createHmac } from 'node:crypto'
 import { hostname } from 'node:os'
-import { createDatabase, OperationalRepository, OutboxRepository, OrganizationRepository, KyselyEventStore, KyselyVendorStore, KyselyDependencyStore, KyselyRiskStore, KyselyHealthStore } from '@ecc/database'
+import { createDatabase, OperationalRepository, OutboxRepository, OrganizationRepository, KyselyEventStore, KyselyVendorStore, KyselyDependencyStore, KyselyRiskStore, KyselyHealthStore, KyselyBriefStore } from '@ecc/database'
 import { canonicalizeDomainEvent, type DomainEventEnvelope } from '@ecc/contracts'
 import type { OutboxMessage } from '@ecc/domain'
-import { OperationalProjector, EventEngine, VendorEngine, DependencyEngine, RiskEngine, HealthEngine } from '@ecc/event-engine'
+import { OperationalProjector, EventEngine, VendorEngine, DependencyEngine, RiskEngine, HealthEngine, BriefEngine } from '@ecc/event-engine'
 
 const db = createDatabase()
 const outbox = new OutboxRepository(db)
@@ -15,12 +15,15 @@ const vendorEngine = new VendorEngine({ store: new KyselyVendorStore(db) })
 const dependencyEngine = new DependencyEngine({ store: new KyselyDependencyStore(db), eventEngine, vendorEngine })
 const riskEngine = new RiskEngine({ store: new KyselyRiskStore(db) })
 const healthEngine = new HealthEngine({ store: new KyselyHealthStore(db) })
+const briefEngine = new BriefEngine({ store: new KyselyBriefStore(db) })
 const workerId = `${hostname()}-${process.pid}`
 const pollInterval = parsePositiveInt(process.env.OUTBOX_POLL_INTERVAL_MS, 2000)
 const batchSize = parsePositiveInt(process.env.OUTBOX_BATCH_SIZE, 20)
 const transport = process.env.OUTBOX_TRANSPORT ?? 'console'
 const riskSweepInterval = parseNonNegativeInt(process.env.RISK_SWEEP_INTERVAL_MS, 300_000)
+const briefSchedulerInterval = parseNonNegativeInt(process.env.BRIEF_SCHEDULER_INTERVAL_MS, 60_000)
 let lastRiskSweepAt = 0
+let lastBriefSchedulerAt = 0
 
 console.log(`[worker] started id=${workerId} transport=${transport}`)
 
@@ -111,6 +114,13 @@ while (!stopping) {
       lastRiskSweepAt = sweepAt.getTime()
       if (result.failed.length) console.error(`[risk] scheduled sweep partial failure evaluated=${result.evaluated} failed=${result.failed.length}`, result.failed)
       else console.log(`[risk] scheduled sweep evaluated=${result.evaluated}`)
+    }
+    if (briefSchedulerInterval > 0 && Date.now() - lastBriefSchedulerAt >= briefSchedulerInterval) {
+      const scheduledAt = new Date()
+      const result = await briefEngine.processDueSchedules(scheduledAt)
+      lastBriefSchedulerAt = scheduledAt.getTime()
+      if (result.failed.length) console.error(`[brief] scheduler partial failure generated=${result.generated} duplicates=${result.duplicates} failed=${result.failed.length}`, result.failed)
+      else if (result.generated > 0) console.log(`[brief] scheduler generated=${result.generated} duplicates=${result.duplicates}`)
     }
   } catch (error) {
     console.error('[worker] poll failed', error)

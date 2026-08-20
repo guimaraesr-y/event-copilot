@@ -22,6 +22,7 @@ import type { ChangeProposalEngine } from './change-proposal-engine.ts'
 import type { DependencyEngine } from './dependency-engine.ts'
 import type { RiskEngine } from './risk-engine.ts'
 import type { HealthEngine } from './health-engine.ts'
+import type { BriefEngine } from './brief-engine.ts'
 import type {
   AgentProviderMessage,
   AgentToolCall,
@@ -44,6 +45,7 @@ export interface OperationalAgentDependencies {
   dependencyEngine: DependencyEngine
   riskEngine: RiskEngine
   healthEngine: HealthEngine
+  briefEngine: BriefEngine
   operations: OperationalAgentOperationsReader
   now?: () => Date
   newId?: () => string
@@ -226,13 +228,42 @@ const TOOLS: AgentToolDefinition[] = [
     parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
   },
   {
+    name: 'get_daily_brief',
+    description: 'Get today current Daily Command Brief for the organization. Use for questions about today priorities, morning brief or what needs attention today.',
+    parameters: emptyObjectSchema(),
+  },
+  {
+    name: 'generate_daily_brief',
+    description: 'Generate a fresh revision of today Daily Command Brief. Only call when the CURRENT user explicitly asks to generate/rebuild the brief.',
+    parameters: emptyObjectSchema(),
+  },
+  {
+    name: 'get_brief_history',
+    description: 'List recent Daily Command Brief revisions for the organization.',
+    parameters: objectSchema({ limit: { type: 'integer', minimum: 1, maximum: 30 } }),
+  },
+  {
+    name: 'get_daily_brief_settings',
+    description: 'Read Daily Command Brief schedule settings: enabled state, local delivery time and WhatsApp recipient.',
+    parameters: emptyObjectSchema(),
+  },
+  {
+    name: 'configure_daily_brief',
+    description: 'Change Daily Command Brief schedule settings. Only call when the CURRENT user explicitly asks to enable/disable the morning brief, change its time, or change its WhatsApp recipient.',
+    parameters: objectSchema({
+      enabled: { type: ['boolean','null'], description: 'Optional enabled state.' },
+      localTime: { type: ['string','null'], pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: 'Optional organization-local HH:mm delivery time.' },
+      recipient: nullableStringSchema('Optional WhatsApp recipient phone.'),
+    }),
+  },
+  {
     name: 'acknowledge_risk',
     description: 'Mark a current risk as acknowledged/seen without resolving its underlying cause. Only call when the CURRENT user explicitly says they are aware of that risk.',
     parameters: objectSchema({ riskId: stringSchema('Exact risk UUID from a risk tool result.') }, ['riskId']),
   },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health','generate_daily_brief','configure_daily_brief'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -596,6 +627,38 @@ export class OperationalAgent {
         const result=await this.deps.healthEngine.evaluateEvent({organizationId:input.organizationId,eventId:event.id,triggerType:'manual',triggerKey:`agent:${turnId}:${toolIndex}:health-evaluation`})
         return {reply:`Health Score de ${event.name} recalculado: ${result.evaluation.score}/100 (${healthLabel(result.evaluation.status)}).`,duplicate:result.duplicate,changed:result.changed,health:serializeHealthEvaluationForAgent(result.evaluation)}
       }
+      case 'get_daily_brief': {
+        assertNoUnexpectedKeys(call.arguments,[])
+        const brief=await this.deps.briefEngine.getToday(input.organizationId)
+        return {brief:serializeBriefForAgent(brief)}
+      }
+      case 'generate_daily_brief': {
+        assertNoUnexpectedKeys(call.arguments,[])
+        if(!isExplicitBriefGeneration(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to generate the daily brief')
+        const result=await this.deps.briefEngine.generateDaily({organizationId:input.organizationId,triggerType:'agent',triggerKey:`agent:${turnId}:${toolIndex}:daily-brief`,generatedBySender:input.sender})
+        return {reply:`Daily Brief gerado: ${result.brief.summary.priorities.length} prioridade(s) em ${result.brief.summary.activeEvents} evento(s) ativo(s).`,duplicate:result.duplicate,brief:serializeBriefForAgent(result.brief)}
+      }
+      case 'get_brief_history': {
+        assertNoUnexpectedKeys(call.arguments,['limit'])
+        const limit=optionalInteger(call.arguments,'limit',10,1,30)
+        const rows=await this.deps.briefEngine.list(input.organizationId,limit)
+        return {briefs:rows.map(serializeBriefForAgent),count:rows.length}
+      }
+      case 'get_daily_brief_settings': {
+        assertNoUnexpectedKeys(call.arguments,[])
+        const pref=await this.deps.briefEngine.getPreference(input.organizationId)
+        return {settings:serializeBriefPreferenceForAgent(pref)}
+      }
+      case 'configure_daily_brief': {
+        assertNoUnexpectedKeys(call.arguments,['enabled','localTime','recipient'])
+        if(!isExplicitBriefConfiguration(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to configure the daily brief')
+        const enabled=optionalBoolean(call.arguments,'enabled')
+        const localTime=optionalNullableString(call.arguments,'localTime')
+        const recipient=call.arguments.recipient===undefined?undefined:optionalNullableString(call.arguments,'recipient')
+        if(enabled===null&&localTime===null&&recipient===undefined) throw new OperationalAgentValidationError('configure_daily_brief requires at least one setting')
+        const pref=await this.deps.briefEngine.configurePreference({organizationId:input.organizationId,...(enabled!==null?{enabled}:{}),...(localTime?{localTime}:{}),...(recipient!==undefined?{recipient}:{}),updatedBySender:input.sender,fallbackRecipient:input.sender})
+        return {reply:`Daily Brief ${pref.enabled?'ativado':'desativado'}${pref.enabled?` para ${pref.localTime} (${input.organizationTimezone})`:''}.`,settings:serializeBriefPreferenceForAgent(pref)}
+      }
       case 'acknowledge_risk': {
         assertNoUnexpectedKeys(call.arguments,['riskId'])
         if(!isExplicitRiskAcknowledgement(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly acknowledge the risk')
@@ -671,7 +734,7 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
-  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.`
+  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.`
 }
 
 function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[]): string {
@@ -760,6 +823,12 @@ function serializeHealthForAgent(value: import('@ecc/domain').EventHealthCurrent
 function serializeHealthEvaluationForAgent(value: import('@ecc/domain').EventHealthEvaluation) { return { score:value.score,previousScore:value.previousScore,delta:value.delta,status:value.status,breakdown:value.breakdown,evaluatedAt:value.evaluatedAt.toISOString() } }
 function isExplicitHealthEvaluation(text:string):boolean { const n=normalizeDecisionText(text); return /\b(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar|avalie|avaliar).*(saude|health|score)\b|\b(saude|health|score).*(reavalie|reavaliar|recalcule|recalcular|atualize|atualizar)\b/.test(n) }
 function healthLabel(status: import('@ecc/domain').HealthStatus): string { return status==='excellent'?'excelente':status==='good'?'bom':status==='attention'?'atenção':'crítico' }
+
+function serializeBriefForAgent(value: import('@ecc/domain').DailyBrief) { return { id:value.id,referenceDate:value.referenceDate,revision:value.revision,status:value.status,summary:value.summary,renderedText:value.renderedText,generatedAt:value.generatedAt.toISOString(),deliveryRequestedAt:value.deliveryRequestedAt?.toISOString()??null } }
+function serializeBriefPreferenceForAgent(value: import('@ecc/domain').BriefPreference) { return { enabled:value.enabled,localTime:value.localTime,channel:value.channel,recipient:value.recipient,updatedBySender:value.updatedBySender,updatedAt:value.updatedAt.toISOString() } }
+function isExplicitBriefGeneration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(gere|gerar|gera|monte|montar|refaca|refazer|recrie|recriar).*(brief|resumo).*(hoje|diario|daily)?\b|\b(brief|resumo).*(gere|gerar|refaca|atualize)\b/.test(n) }
+function isExplicitBriefConfiguration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(brief|resumo).*(ativ|desativ|horario|hora|todo dia|diario|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere).*(brief|resumo)\b/.test(n) }
+function optionalBoolean(args:Record<string,unknown>,key:string):boolean|null { const value=args[key]; if(value===undefined||value===null)return null; if(typeof value!=='boolean')throw new OperationalAgentValidationError(`Tool argument ${key} must be a boolean or null`); return value }
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }

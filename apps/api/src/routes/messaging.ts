@@ -16,6 +16,13 @@ export function registerMessagingRoutes(app: Hono, engine: MessagingEngine): voi
     } catch (error) { return mapError(c, error) }
   })
 
+  app.post('/api/v1/internal/automation-actions/:actionId/daily-brief-message', async (c) => {
+    try {
+      const result = await engine.prepareDailyBrief(c.req.param('actionId'))
+      return c.json({ message: serialize(result.message), duplicate: !result.created }, result.created ? 201 : 200)
+    } catch (error) { return mapError(c, error) }
+  })
+
   app.post('/api/v1/internal/outbound-messages/:messageId/send', async (c) => {
     try {
       const result = await engine.send(c.req.param('messageId'))

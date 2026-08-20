@@ -167,3 +167,15 @@ console.log('OperationalAgentProvider OpenRouter: 4/4 behavioral scenarios passe
 }
 
 console.log('OperationalAgentProvider deterministic health routing: 3/3 encoding scenarios passed')
+
+{
+  const provider = new DeterministicOperationalAgentProvider()
+  const configured = await provider.complete({ messages: [{ role:'user', content:'Configure o brief para todo dia às 07:30 no +55 21 99999-9999' }], tools })
+  assert(configured.toolCalls[0]?.name==='configure_daily_brief','deterministic provider routes explicit brief configuration')
+  assert(configured.toolCalls[0]?.arguments.localTime==='07:30','deterministic provider extracts local brief time')
+  const generated = await provider.complete({ messages: [{ role:'user', content:'Gere o brief de hoje' }], tools })
+  assert(generated.toolCalls[0]?.name==='generate_daily_brief','deterministic provider routes brief generation')
+  const read = await provider.complete({ messages: [{ role:'user', content:'Qual o brief de hoje?' }], tools })
+  assert(read.toolCalls[0]?.name==='get_daily_brief','deterministic provider routes daily brief read')
+}
+console.log('OperationalAgentProvider deterministic brief routing: 3/3 behavioral scenarios passed')

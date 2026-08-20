@@ -1,6 +1,6 @@
 # 🎛️ Event Command Center
 
-**Versão atual: 0.13.0 — Health Score**
+**Versão atual: 0.14.0 — Daily Command Brief**
 
 Backend vertical para operação de eventos e cerimoniais. O ECC concentra o estado real do evento no PostgreSQL, mantém as decisões de negócio em engines determinísticas e usa IA como interface operacional — nunca como fonte de verdade.
 
@@ -8,7 +8,7 @@ Backend vertical para operação de eventos e cerimoniais. O ECC concentra o est
 
 ## 🧭 Visão geral
 
-O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências, priorização operacional por risco e Health Score explicável por evento.
+O projeto cobre planejamento, fornecedores, mensageria, inbound, Inbox/Activity, comandos em linguagem natural, Operational Agent multi-evento, Change Proposals, propagação controlada de dependências, priorização operacional por risco, Health Score explicável e Daily Command Brief agendável por organização.
 
 ```text
 Cerimonialista / API / WhatsApp
@@ -34,15 +34,16 @@ Change Proposals ────────────┘        ↓
                                       ↓
                       events.health_score + histórico
                                       ↓
-                           Agent / API / Operational Inbox
-                                      ↓
-                         PostgreSQL + Transactional Outbox
-                                      ↓
-                                    Worker
-                                ┌─────┴─────┐
-                                ↓           ↓
-                           Projections      n8n
-                         Activity/Inbox  efeitos externos
+                                  BriefEngine
+                           ┌──────────┴──────────┐
+                           ↓                     ↓
+                    Agent / API         scheduler por tenant
+                                                 ↓
+                                      brief.delivery_requested
+                                                 ↓
+                                               n8n
+                                                 ↓
+                                      WhatsApp / efeitos externos
 ```
 
 ## ✅ Features implementadas
@@ -65,8 +66,43 @@ Change Proposals ────────────┘        ↓
 | 11 | Dependency Engine | [docs/mini-feature-11.md](docs/mini-feature-11.md) |
 | 12 | Risk Engine | [docs/mini-feature-12.md](docs/mini-feature-12.md) |
 | 13 | Health Score | [docs/mini-feature-13.md](docs/mini-feature-13.md) |
+| 14 | Daily Command Brief + agendamento | [docs/mini-feature-14.md](docs/mini-feature-14.md) |
 
 Áudio/voice input permanece no backlog.
+
+## ☀️ Daily Command Brief
+
+A Feature 14 consolida o estado operacional da organização em um brief diário persistido e explicável. O conteúdo é calculado pelo backend; o LLM apenas consulta, explica ou altera a preferência quando solicitado.
+
+```text
+Health / Risks / Tasks / Vendors / Dependencies
+                    ↓
+                BriefEngine
+                    ↓
+             daily_briefs
+                    ↓
+        brief.delivery_requested
+                    ↓
+                   n8n
+                    ↓
+            WhatsApp do operador
+```
+
+O envio é opt-in por organização. Horário e destinatário podem ser configurados pela API ou pelo próprio Operational Agent, sempre no timezone da organização:
+
+```text
+"Me manda o brief todo dia às 07:30 neste WhatsApp."
+```
+
+O worker verifica preferências periodicamente; a chave `scheduled:YYYY-MM-DD` garante no máximo um envio agendado por organização/dia, inclusive após restart. Gerações manuais criam revisões sem apagar o histórico.
+
+Configuração do scheduler:
+
+```env
+BRIEF_SCHEDULER_INTERVAL_MS=60000
+```
+
+Detalhes: [docs/mini-feature-14.md](docs/mini-feature-14.md).
 
 ## 💚 Health Score
 
@@ -139,7 +175,7 @@ Sugestões são stale-aware: se o alvo mudou depois da avaliação, a aplicaçã
 
 ## 🤖 Operational Agent
 
-O Agent trabalha sobre vários eventos usando tools controladas pelo servidor. Ele pode consultar riscos, Health Score e comparar a prioridade operacional do workspace sem calcular ou inventar scores.
+O Agent trabalha sobre vários eventos usando tools controladas pelo servidor. Ele pode consultar riscos, Health Score e Daily Brief, além de configurar o horário/destinatário do brief sem calcular ou inventar prioridades.
 
 ### Ollama
 
@@ -179,7 +215,7 @@ No Windows com Git Bash, `scripts/n8n-sync.sh` desabilita automaticamente a conv
 
 ```bash
 python3 scripts/validate_foundation.py
-python3 scripts/validate_feature_13.py
+python3 scripts/validate_feature_14.py
 ```
 
 Smoke isolado e sem IA paga:
@@ -195,16 +231,17 @@ COMMAND_INTERPRETER=rule_based
 OPERATIONAL_AGENT_PROVIDER=deterministic
 MESSAGING_PROVIDER=mock
 RISK_SWEEP_INTERVAL_MS=0
+BRIEF_SCHEDULER_INTERVAL_MS=500
 ```
 
-O sweep de risco fica desligado apenas no smoke; os cenários de Risk Engine são disparados por Domain Events de forma determinística.
+O sweep de risco fica desligado apenas no smoke; o scheduler de brief roda em intervalo curto para validar configuração pelo Agent e entrega via n8n/mock sem depender do relógio de produção.
 
 ## 📁 Estrutura
 
 ```text
 apps/
   api/                 HTTP API e composição das engines
-  worker/              outbox, projections, Dependency/Risk/Health evaluation
+  worker/              outbox, projections, Dependency/Risk/Health e Brief scheduler
 packages/
   domain/              contratos e regras de domínio
   database/            Kysely, repositories e migrations
@@ -227,6 +264,8 @@ validation/              cenários comportamentais
 - Dependency Engine não propaga alterações sem autorização explícita.
 - Risk Engine é determinístico; IA apenas consulta/explica riscos.
 - Health Score é calculado pelo backend a partir dos riscos ativos; IA não escolhe nota nem tendência.
+- Daily Brief e ranking de prioridades são determinísticos; o Agent só consulta/configura.
+- O agendamento do brief é server-owned e idempotente por organização/data.
 - `acknowledged` não resolve a causa de um risco.
 - Tenant isolation continua por `organization_id`; `x-organization-id` ainda é contexto, **não autenticação real**.
 
@@ -236,8 +275,8 @@ validation/              cenários comportamentais
 11 Dependency Engine       ✅
 12 Risk Engine             ✅
 13 Health Score            ✅
-14 Daily Command Brief     próxima
-15 Briefing D-1
+14 Daily Command Brief     ✅
+15 Briefing D-1            próxima
 16 Event Day Mode
 17 Dashboard
 

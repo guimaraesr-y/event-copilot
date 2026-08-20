@@ -167,4 +167,16 @@ assert(crossTenant.status==='needs_review','cross-tenant ambiguity requires revi
 const reviewEvents=store.outbox.slice(beforeCrossTenant).filter((e)=>e.eventType==='message.review_required')
 assert(reviewEvents.length===2 && reviewEvents.every((e)=>Array.isArray(e.payload.candidateEventVendorIds)&&e.payload.candidateEventVendorIds.length===1),'cross-tenant review events isolate candidate ids per organization')
 
-console.log('MessagingEngine: 18/18 behavioral scenarios passed')
+
+const briefStore=new Store()
+briefStore.action={id:'10000000-0000-4000-8000-000000000010',organizationId:action.organizationId,actionType:'daily_brief.prepare',status:'prepared',aggregateType:'daily_brief',aggregateId:'10000000-0000-4000-8000-000000000011',payload:{briefId:'10000000-0000-4000-8000-000000000011',referenceDate:'2026-08-19',recipient:'+55 21 98888-7777',text:'Bom dia! Brief operacional.'}}
+const briefProvider=new Provider();const briefEngine=new MessagingEngine({store:briefStore,provider:briefProvider,now,newId})
+const briefPrepared=await briefEngine.prepareDailyBrief(briefStore.action.id)
+assert(briefPrepared.created&&briefPrepared.message.messageType==='daily_brief'&&briefPrepared.message.recipient==='5521988887777','daily brief creates generic WhatsApp outbound message')
+const briefDuplicate=await briefEngine.prepareDailyBrief(briefStore.action.id)
+assert(!briefDuplicate.created&&briefDuplicate.message.id===briefPrepared.message.id,'daily brief message preparation is idempotent')
+const briefSent=await briefEngine.send(briefPrepared.message.id)
+assert(briefSent.message.status==='sent'&&briefProvider.calls===1,'daily brief uses standard provider send pipeline')
+
+console.log('MessagingEngine: 21/21 behavioral scenarios passed')
+

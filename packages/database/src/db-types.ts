@@ -450,6 +450,35 @@ export interface EventHealthEvaluationsTable {
   evaluated_at: ColumnType<Date, Date | string, never>
 }
 
+
+export interface OrganizationBriefPreferencesTable {
+  organization_id: string
+  enabled: boolean
+  local_time: string
+  channel: 'whatsapp'
+  recipient: string | null
+  updated_by_sender: string | null
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
+export interface DailyBriefsTable {
+  id: string
+  organization_id: string
+  brief_type: import('@ecc/domain').BriefType
+  reference_date: ColumnType<string, string, string>
+  revision: number
+  status: import('@ecc/domain').BriefStatus
+  trigger_type: import('@ecc/domain').BriefTriggerType
+  trigger_key: string
+  summary: JSONColumnType<import('@ecc/domain').DailyBriefSummary, import('@ecc/domain').DailyBriefSummary, import('@ecc/domain').DailyBriefSummary>
+  rendered_text: string
+  generated_by_sender: string | null
+  generated_at: ColumnType<Date, Date | string, never>
+  superseded_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  delivery_requested_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -473,6 +502,8 @@ export interface DatabaseSchema {
   risk_evaluations: RiskEvaluationsTable
   event_risks: EventRisksTable
   event_health_evaluations: EventHealthEvaluationsTable
+  organization_brief_preferences: OrganizationBriefPreferencesTable
+  daily_briefs: DailyBriefsTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

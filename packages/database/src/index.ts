@@ -25,3 +25,5 @@ export * from './repositories/kysely-dependency-store.ts'
 export * from './repositories/kysely-risk-store.ts'
 
 export * from './repositories/kysely-health-store.ts'
+
+export * from './repositories/kysely-brief-store.ts'

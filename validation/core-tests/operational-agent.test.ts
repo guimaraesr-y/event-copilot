@@ -89,6 +89,9 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
     if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
+    if(user.includes('Configure o brief')) return tool('configure_daily_brief',{enabled:true,localTime:'07:30',recipient:'+5521999999999'})
+    if(user.includes('Qual o brief')) return tool('get_daily_brief',{})
+    if(user.includes('Gere o brief')) return tool('generate_daily_brief',{})
     if(user.includes('Recalcule a saúde')) return tool('evaluate_event_health',{eventId:ANA})
     if(user.includes('saúde')) return tool('get_event_health',{eventId:ANA})
     if(user==='NÃO APROVE'){const system=input.messages.find(m=>m.role==='system'&&m.content.includes('PROPOSTAS DE MUDANÇA PENDENTES'))?.content??'';const section=system.split('PROPOSTAS DE MUDANÇA PENDENTES')[1]??'';const proposalId=section.match(/\"id\":\"([0-9a-f-]{36})\"/i)?.[1];if(proposalId)return tool('approve_change_proposal',{proposalId})}
@@ -108,7 +111,9 @@ const provider=new ScriptedProvider()
 const dependencyEngine={async list(){return[]},async get(){throw new Error('dependency not configured in legacy agent test')},async applySuggestion(){throw new Error('dependency not configured')},async applySuggestionsForProposal(){return{impacts:[],applied:0,duplicates:0,failed:[],reply:'0 ajuste(s) de dependência aplicado(s).'}},async resolveReview(){throw new Error('dependency not configured')}} as any
 const riskEngine={async list(){return[]},async workspaceSummary(){return[]},async evaluateEvent(){return{risks:[],detected:0,updated:0,resolved:0,duplicate:false}},async get(){throw new Error('risk not configured')},async acknowledge(){throw new Error('risk not configured')}} as any
 const healthEngine={async getCurrent(_o:string,eventId:string){const e=es.events.find(x=>x.id===eventId)!;return{event:e,score:e.healthScore,status:'excellent',breakdown:null,evaluatedAt:null,delta:null}},async workspace(){return[]},async evaluateEvent(){return{evaluation:{score:100,status:'excellent',previousScore:100,delta:0,breakdown:{},evaluatedAt:fixedNow},duplicate:false,changed:false}}} as any
-const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
+const briefState:any={preference:{organizationId:'org-1',enabled:false,localTime:'08:00',channel:'whatsapp',recipient:null,updatedBySender:null,createdAt:fixedNow,updatedAt:fixedNow},brief:{id:'brief-1',organizationId:'org-1',type:'daily',referenceDate:'2026-08-17',revision:1,status:'generated',triggerType:'agent',triggerKey:'test',summary:{referenceDate:'2026-08-17',timezone:'America/Sao_Paulo',activeEvents:2,criticalEvents:0,attentionEvents:0,overdueTasks:1,dueTodayTasks:1,pendingVendors:0,openDependencies:0,pendingChanges:0,openInbox:0,events:[],priorities:[{rank:1,type:'task',eventId:ANA,eventName:'Ana & Pedro',sourceId:'task-1',severity:'high',score:80,title:'Confirmar buffet',reason:'Tarefa atrasada'}]},renderedText:'Bom dia! Prioridade: confirmar buffet.',generatedBySender:'planner',generatedAt:fixedNow,supersededAt:null,deliveryRequestedAt:null}}
+const briefEngine={async getToday(){return briefState.brief},async list(){return[briefState.brief]},async getPreference(){return briefState.preference},async configurePreference(input:any){briefState.preference={...briefState.preference,...input,organizationId:'org-1',channel:'whatsapp',createdAt:fixedNow,updatedAt:fixedNow};return briefState.preference},async generateDaily(){return{brief:briefState.brief,duplicate:false}}} as any
+const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,briefEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
 {
@@ -168,6 +173,18 @@ let createdTurnId=''
   assert(r.turn.toolTrace[0]?.name==='evaluate_event_health'&&r.turn.modelCalls===1,'explicit Health Score recalculation uses guarded write tool')
 }
 {
+  const r=await agent.chat({...base,text:'Qual o brief de hoje?',idempotencyKey:'agent-brief-read'})
+  assert(r.turn.toolTrace[0]?.name==='get_daily_brief'&&r.turn.modelCalls===2,'agent reads Daily Brief through brief tool')
+}
+{
+  const r=await agent.chat({...base,text:'Configure o brief para todo dia às 07:30 no +55 21 99999-9999',idempotencyKey:'agent-brief-config'})
+  assert(r.turn.toolTrace[0]?.name==='configure_daily_brief'&&briefState.preference.enabled&&briefState.preference.localTime==='07:30','agent explicitly configures scheduled Daily Brief')
+}
+{
+  const r=await agent.chat({...base,text:'Gere o brief de hoje',idempotencyKey:'agent-brief-generate'})
+  assert(r.turn.toolTrace[0]?.name==='generate_daily_brief'&&r.turn.modelCalls===1,'agent explicitly generates Daily Brief without second model call')
+}
+{
   const {turn}=await as.createTurnIfAbsent({id:'stuck-turn',organizationId:'org-1',sender:'planner',idempotencyKey:'stuck-key',userText:'Como estão meus eventos?',provider:'ollama',model:'fake',now:fixedNow})
   await as.updateTurn('org-1',turn.id,{status:'processing',updatedAt:fixedNow})
   let conflict=false
@@ -175,4 +192,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 11/11 behavioral scenarios passed')
+console.log('OperationalAgent: 14/14 behavioral scenarios passed')

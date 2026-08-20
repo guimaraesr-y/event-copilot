@@ -22,6 +22,7 @@ Este diretório concentra a documentação funcional e operacional do projeto.
 | 11 — Dependency Engine | [mini-feature-11.md](mini-feature-11.md) |
 | 12 — Risk Engine | [mini-feature-12.md](mini-feature-12.md) |
 | 13 — Health Score | [mini-feature-13.md](mini-feature-13.md) |
+| 14 — Daily Command Brief | [mini-feature-14.md](mini-feature-14.md) |
 
 ## Operação e benchmarks
 
