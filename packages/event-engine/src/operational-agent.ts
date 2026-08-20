@@ -251,9 +251,9 @@ const TOOLS: AgentToolDefinition[] = [
     name: 'configure_daily_brief',
     description: 'Change Daily Command Brief schedule settings. Only call when the CURRENT user explicitly asks to enable/disable the morning brief, change its time, or change its WhatsApp recipient.',
     parameters: objectSchema({
-      enabled: { type: ['boolean','null'], description: 'Optional enabled state.' },
-      localTime: { type: ['string','null'], pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: 'Optional organization-local HH:mm delivery time.' },
-      recipient: nullableStringSchema('Optional WhatsApp recipient phone.'),
+      enabled: { type: 'boolean', description: 'Optional. Set true only when the user explicitly asks to activate/receive the Daily Brief; set false only when explicitly asking to disable it. Omit when unchanged.' },
+      localTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$', description: 'Optional organization-local HH:mm delivery time. Omit when unchanged.' },
+      recipient: { type: 'string', description: 'Optional WhatsApp recipient phone. Omit when unchanged.' },
     }),
   },
   {
@@ -333,10 +333,11 @@ export class OperationalAgent {
       const history = this.historyTurns > 0 ? await this.deps.store.listRecentTurns(input.organizationId, sender, this.historyTurns) : []
       const pendingProposals = await this.deps.changeProposalEngine.list({ organizationId: input.organizationId, status: 'proposed', requestedBySender: sender, limit: 10 })
       const openDependencies = await this.deps.dependencyEngine.list({ organizationId: input.organizationId, status: 'open', limit: 30 })
+      const briefPreference = await this.deps.briefEngine.getPreference(input.organizationId)
 
       const messages: AgentProviderMessage[] = [
         { role: 'system', content: buildSystemPrompt(input.organizationTimezone, startedAt) },
-        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals, openDependencies) },
+        { role: 'system', content: buildRuntimeContext(events, currentEvent, pendingProposals, openDependencies, briefPreference) },
         ...history.flatMap((turn): AgentProviderMessage[] => turn.assistantText ? [
           { role: 'user', content: turn.userText },
           { role: 'assistant', content: turn.assistantText },
@@ -652,11 +653,34 @@ export class OperationalAgent {
       case 'configure_daily_brief': {
         assertNoUnexpectedKeys(call.arguments,['enabled','localTime','recipient'])
         if(!isExplicitBriefConfiguration(input.text)) throw new OperationalAgentValidationError('Current user message does not explicitly ask to configure the daily brief')
-        const enabled=optionalBoolean(call.arguments,'enabled')
-        const localTime=optionalNullableString(call.arguments,'localTime')
-        const recipient=call.arguments.recipient===undefined?undefined:optionalNullableString(call.arguments,'recipient')
-        if(enabled===null&&localTime===null&&recipient===undefined) throw new OperationalAgentValidationError('configure_daily_brief requires at least one setting')
-        const pref=await this.deps.briefEngine.configurePreference({organizationId:input.organizationId,...(enabled!==null?{enabled}:{}),...(localTime?{localTime}:{}),...(recipient!==undefined?{recipient}:{}),updatedBySender:input.sender,fallbackRecipient:input.sender})
+        const current=await this.deps.briefEngine.getPreference(input.organizationId)
+        const patch=resolveBriefConfiguration(input.text,call.arguments)
+        if(patch.enabled===undefined&&patch.localTime===undefined&&patch.recipient===undefined) throw new OperationalAgentValidationError('configure_daily_brief requires at least one setting')
+
+        const senderRecipient=whatsAppRecipientFromSender(input.sender)
+        const effectiveRecipient=patch.recipient!==undefined?patch.recipient:current.recipient
+        if(patch.enabled===true&&!effectiveRecipient&&!senderRecipient){
+          const pref=await this.deps.briefEngine.configurePreference({
+            organizationId:input.organizationId,
+            ...(patch.localTime!==undefined?{localTime:patch.localTime}:{}),
+            ...(patch.recipient!==undefined?{recipient:patch.recipient}:{}),
+            updatedBySender:input.sender,
+          })
+          return {
+            reply:`Horário do Daily Brief salvo para ${pref.localTime} (${input.organizationTimezone}). Para ativar o envio diário, informe o número de WhatsApp que deve receber o brief.`,
+            needsRecipient:true,
+            settings:serializeBriefPreferenceForAgent(pref),
+          }
+        }
+
+        const pref=await this.deps.briefEngine.configurePreference({
+          organizationId:input.organizationId,
+          ...(patch.enabled!==undefined?{enabled:patch.enabled}:{}),
+          ...(patch.localTime!==undefined?{localTime:patch.localTime}:{}),
+          ...(patch.recipient!==undefined?{recipient:patch.recipient}:{}),
+          updatedBySender:input.sender,
+          fallbackRecipient:senderRecipient,
+        })
         return {reply:`Daily Brief ${pref.enabled?'ativado':'desativado'}${pref.enabled?` para ${pref.localTime} (${input.organizationTimezone})`:''}.`,settings:serializeBriefPreferenceForAgent(pref)}
       }
       case 'acknowledge_risk': {
@@ -734,14 +758,16 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
-  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.`
+  return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.
+17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.`
 }
 
-function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[]): string {
+function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[], briefPreference: import('@ecc/domain').BriefPreference): string {
   const catalog = events.slice(0, 50).map((event) => ({ id: event.id, name: event.name, type: event.type, startAt: event.startAt.toISOString(), status: event.status }))
   const proposals = pendingProposals.slice(0, 10).map((value) => ({ id: value.proposal.id, eventId: value.proposal.eventId, type: value.proposal.type, currentValue: value.proposal.currentValue, proposedValue: value.proposal.proposedValue, createdAt: value.proposal.createdAt.toISOString() }))
   const dependencies = openDependencies.slice(0, 30).map(serializeDependencyForAgent)
-  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nDEPENDÊNCIAS ABERTAS\n${JSON.stringify(dependencies)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal/dependency IDs são internos e servem apenas para tools.`
+  const brief = { enabled:briefPreference.enabled, localTime:briefPreference.localTime, channel:briefPreference.channel, recipientConfigured:!!briefPreference.recipient }
+  return `CATÁLOGO DE EVENTOS DO TENANT\n${JSON.stringify(catalog)}\n\nEVENTO ATUAL DA CONVERSA\n${current ? JSON.stringify({ id: current.id, name: current.name }) : 'nenhum'}\n\nPROPOSTAS DE MUDANÇA PENDENTES DESTE USUÁRIO\n${JSON.stringify(proposals)}\n\nDEPENDÊNCIAS ABERTAS\n${JSON.stringify(dependencies)}\n\nCONFIGURAÇÃO ATUAL DO DAILY BRIEF\n${JSON.stringify(brief)}\n\nUse somente eventId existente nesse catálogo ao chamar ferramentas. Proposal/dependency IDs são internos e servem apenas para tools.`
 }
 
 function requireEvent(events: Event[], eventId: string): Event {
@@ -827,8 +853,69 @@ function healthLabel(status: import('@ecc/domain').HealthStatus): string { retur
 function serializeBriefForAgent(value: import('@ecc/domain').DailyBrief) { return { id:value.id,referenceDate:value.referenceDate,revision:value.revision,status:value.status,summary:value.summary,renderedText:value.renderedText,generatedAt:value.generatedAt.toISOString(),deliveryRequestedAt:value.deliveryRequestedAt?.toISOString()??null } }
 function serializeBriefPreferenceForAgent(value: import('@ecc/domain').BriefPreference) { return { enabled:value.enabled,localTime:value.localTime,channel:value.channel,recipient:value.recipient,updatedBySender:value.updatedBySender,updatedAt:value.updatedAt.toISOString() } }
 function isExplicitBriefGeneration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(gere|gerar|gera|monte|montar|refaca|refazer|recrie|recriar).*(brief|resumo).*(hoje|diario|daily)?\b|\b(brief|resumo).*(gere|gerar|refaca|atualize)\b/.test(n) }
-function isExplicitBriefConfiguration(text:string):boolean { const n=normalizeDecisionText(text); return /\b(brief|resumo).*(ativ|desativ|horario|hora|todo dia|diario|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere).*(brief|resumo)\b/.test(n) }
-function optionalBoolean(args:Record<string,unknown>,key:string):boolean|null { const value=args[key]; if(value===undefined||value===null)return null; if(typeof value!=='boolean')throw new OperationalAgentValidationError(`Tool argument ${key} must be a boolean or null`); return value }
+function isExplicitBriefConfiguration(text:string):boolean {
+  const n=normalizeDecisionText(text)
+  return /\b(brief|resumo).*(ativ|desativ|horario|hora|todo dia|todos os dias|diario|diariamente|manha|mande|envie|enviar|whatsapp|numero)\b|\b(ativ|desativ|configure|configurar|mude|altere|habilite|desligue).*(brief|resumo)\b/.test(n)
+    || (/\b(whatsapp|numero|telefone)\b/.test(n)&&extractPhone(text)!==undefined)
+}
+function resolveBriefConfiguration(text:string,args:Record<string,unknown>):{enabled?:boolean;localTime?:string;recipient?:string|null}{
+  const enabledIntent=briefEnabledIntent(text)
+  const localTime=extractBriefLocalTime(text)??coerceLocalTime(args.localTime)
+  const textRecipient=extractPhone(text)
+  const recipient=textRecipient!==undefined?textRecipient:coerceRecipient(args.recipient)
+  return {
+    ...(enabledIntent!==null?{enabled:enabledIntent}:{}),
+    ...(localTime!==undefined?{localTime}:{}),
+    ...(recipient!==undefined?{recipient}:{}),
+  }
+}
+function briefEnabledIntent(text:string):boolean|null{
+  const n=normalizeDecisionText(text)
+  if(/\b(desativ|deslig|desabilit|pare de (?:mandar|enviar)|nao (?:mande|envie)).*(brief|resumo)\b|\b(brief|resumo).*(desativ|deslig|desabilit)\b/.test(n))return false
+  if(/\b(ativ|habilit|ligue|mande|envie|quero receber).*(brief|resumo)\b/.test(n))return true
+  if(/\b(brief|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
+  if(/\b(configure|configurar).*(brief|resumo).*\b(todo dia|todos os dias|diariamente)\b/.test(n))return true
+  return null
+}
+function extractBriefLocalTime(text:string):string|undefined{
+  const n=normalizeDecisionText(text)
+  const patterns=[
+    /\b([01]?\d|2[0-3])\s*h\s*([0-5]\d)\b/,
+    /\b([01]?\d|2[0-3])\s*:\s*([0-5]\d)\b/,
+    /\b([01]?\d|2[0-3])\s*h\b/,
+    /\b(?:as|para|pras?|horario(?:\s+para)?)\s+([01]?\d|2[0-3])\b/,
+  ]
+  for(const pattern of patterns){
+    const match=n.match(pattern)
+    if(!match)continue
+    const hour=Number(match[1]);const minute=match[2]===undefined?0:Number(match[2])
+    if(hour>=0&&hour<=23&&minute>=0&&minute<=59)return`${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`
+  }
+  return undefined
+}
+function coerceLocalTime(value:unknown):string|undefined{
+  if(typeof value!=='string')return undefined
+  const direct=value.trim()
+  if(/^([01]\d|2[0-3]):[0-5]\d$/.test(direct))return direct
+  return extractBriefLocalTime(direct)
+}
+function extractPhone(text:string):string|undefined{
+  const match=text.match(/\+?\d[\d ()-]{8,20}\d/)
+  if(!match)return undefined
+  const digits=match[0].replace(/\D/g,'')
+  return digits.length>=10&&digits.length<=15?digits:undefined
+}
+function coerceRecipient(value:unknown):string|null|undefined{
+  if(value===undefined)return undefined
+  if(value===null||value==='')return null
+  if(typeof value!=='string')return undefined
+  const digits=value.replace(/\D/g,'')
+  return digits.length>=10&&digits.length<=15?digits:undefined
+}
+function whatsAppRecipientFromSender(sender:string):string|null{
+  const digits=sender.replace(/\D/g,'')
+  return digits.length>=10&&digits.length<=15?digits:null
+}
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
 function stringSchema(description: string): Record<string, unknown> { return { type: 'string', minLength: 1, description } }

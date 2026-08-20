@@ -89,6 +89,10 @@ class ScriptedProvider implements OperationalAgentProvider {
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
     if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
+    if(user.includes('configure meu brief diario pa 21h50')) return tool('configure_daily_brief',{enabled:false,localTime:'21:00'})
+    if(user.includes('ative meu brief diario')) return tool('configure_daily_brief',{enabled:'true'})
+    if(user.includes('mude apenas o horario do brief diario')) return tool('configure_daily_brief',{enabled:'true',localTime:'22:10'})
+    if(user.includes('desative meu brief diario')) return tool('configure_daily_brief',{enabled:'true'})
     if(user.includes('Configure o brief')) return tool('configure_daily_brief',{enabled:true,localTime:'07:30',recipient:'+5521999999999'})
     if(user.includes('Qual o brief')) return tool('get_daily_brief',{})
     if(user.includes('Gere o brief')) return tool('generate_daily_brief',{})
@@ -181,6 +185,32 @@ let createdTurnId=''
   assert(r.turn.toolTrace[0]?.name==='configure_daily_brief'&&briefState.preference.enabled&&briefState.preference.localTime==='07:30','agent explicitly configures scheduled Daily Brief')
 }
 {
+  briefState.preference={...briefState.preference,enabled:false,localTime:'08:00',recipient:null}
+  const r=await agent.chat({...base,text:'configure meu brief diario pa 21h50 todos os dias',idempotencyKey:'agent-brief-model-false'})
+  assert(r.turn.toolTrace[0]?.name==='configure_daily_brief','brief schedule request still uses configure tool')
+  assert(!briefState.preference.enabled&&briefState.preference.localTime==='21:50','server overrides erroneous model disable intent and parses 21h50 from user text')
+  assert(r.reply.includes('informe o número de WhatsApp'),'missing delivery recipient is handled conversationally instead of HTTP 422')
+}
+{
+  const r=await agent.chat({...base,text:'ative meu brief diario',idempotencyKey:'agent-brief-string-boolean'})
+  assert(!briefState.preference.enabled&&briefState.preference.localTime==='21:50','string boolean from model no longer causes 422 and preserves configured time')
+  assert(r.reply.includes('informe o número de WhatsApp'),'activation without recipient asks for WhatsApp number')
+}
+{
+  const r=await agent.chat({...base,text:'ative meu brief diario no WhatsApp +55 21 98888-7777',idempotencyKey:'agent-brief-string-boolean-phone'})
+  assert(briefState.preference.enabled&&briefState.preference.localTime==='21:50'&&briefState.preference.recipient==='5521988887777','recipient in current user text completes activation despite malformed model boolean')
+}
+{
+  briefState.preference={...briefState.preference,enabled:false,localTime:'21:50'}
+  const r=await agent.chat({...base,text:'mude apenas o horario do brief diario para 22h10',idempotencyKey:'agent-brief-time-only'})
+  assert(!briefState.preference.enabled&&briefState.preference.localTime==='22:10','time-only change preserves disabled state even when model incorrectly sends enabled=true')
+}
+{
+  briefState.preference={...briefState.preference,enabled:true,recipient:'5521988887777'}
+  const r=await agent.chat({...base,text:'desative meu brief diario',idempotencyKey:'agent-brief-disable-authoritative-text'})
+  assert(!briefState.preference.enabled,'explicit user disable wins even when model incorrectly sends enabled=true')
+}
+{
   const r=await agent.chat({...base,text:'Gere o brief de hoje',idempotencyKey:'agent-brief-generate'})
   assert(r.turn.toolTrace[0]?.name==='generate_daily_brief'&&r.turn.modelCalls===1,'agent explicitly generates Daily Brief without second model call')
 }
@@ -192,4 +222,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 14/14 behavioral scenarios passed')
+console.log('OperationalAgent: 19/19 behavioral scenarios passed')

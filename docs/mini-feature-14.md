@@ -221,7 +221,9 @@ Exemplos:
 
 `configure_daily_brief` e `generate_daily_brief` possuem guards server-side e só são executadas quando a mensagem atual contém intenção explícita.
 
-Quando o Agent é acessado pelo próprio WhatsApp, o `sender` pode ser usado como destinatário de fallback ao habilitar a configuração.
+Para configuração do schedule, o texto atual do usuário é a fonte autoritativa para ativar/desativar o brief. O payload produzido pelo LLM é tratado como não confiável: valores como `enabled: "true"`, `1` ou um boolean incorreto não conseguem ligar/desligar a preferência por conta própria. O horário também é normalizado server-side a partir de formas naturais como `21h50`, `21:50`, `7h30` ou `7h`.
+
+Quando o Agent é acessado pelo próprio WhatsApp, o `sender` pode ser usado como destinatário de fallback ao habilitar a configuração. No CLI/local, em que o sender pode ser `planner-local`, uma ativação sem telefone salva o horário mas mantém `enabled=false` e pede explicitamente um número de WhatsApp.
 
 ## Segurança e idempotência
 
