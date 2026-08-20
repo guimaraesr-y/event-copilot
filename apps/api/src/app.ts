@@ -57,8 +57,9 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const riskEngine = new RiskEngine({ store: new KyselyRiskStore(db) })
   const healthEngine = new HealthEngine({ store: new KyselyHealthStore(db) })
   const briefEngine = new BriefEngine({ store: new KyselyBriefStore(db) })
+  const agentStore = new KyselyAgentStore(db)
   const operationalAgent = new OperationalAgent({
-    store: new KyselyAgentStore(db),
+    store: agentStore,
     provider: createOperationalAgentProvider(),
     eventEngine,
     vendorEngine,
@@ -93,7 +94,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerInboundMessageRoutes(app, inboundEngine)
   registerOperationalRoutes(app, organizationRepository, operationalRepository)
   registerCommandRoutes(app, organizationRepository, commandEngine)
-  registerOperationalAgentRoutes(app, organizationRepository, operationalAgent)
+  registerOperationalAgentRoutes(app, organizationRepository, operationalAgent, briefEngine, agentStore)
   registerChangeProposalRoutes(app, organizationRepository, changeProposalEngine)
   registerDependencyRoutes(app, organizationRepository, dependencyEngine)
   registerRiskRoutes(app, organizationRepository, riskEngine)
