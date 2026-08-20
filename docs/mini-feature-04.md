@@ -64,6 +64,10 @@ The n8n webhook and API `/internal` routes are intentionally blocked by Caddy. T
 
 ## Syncing the workflow
 
+O stack local faz o primeiro deploy automaticamente através do serviço one-shot `n8n-init` do Compose. Em uma instância n8n vazia, ele importa e publica o workflow antes do runtime e do worker iniciarem.
+
+Para republicar uma alteração do JSON com o stack já rodando:
+
 ```bash
 ./scripts/n8n-sync.sh
 ```

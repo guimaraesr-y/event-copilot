@@ -31,6 +31,11 @@ for n in ['configure_daily_brief','generate_daily_brief','get_daily_brief']:
 worker=text('apps/worker/src/index.ts')
 for n in ['KyselyBriefStore','BriefEngine','BRIEF_SCHEDULER_INTERVAL_MS','processDueSchedules']:
   if n not in worker: fail(f'worker brief scheduler missing {n}')
+compose=text('compose.yaml')
+for n in ['n8n-init:','service_completed_successfully','n8n import:workflow --input=/files/n8n/workflows/ecc-domain-event-gateway.json','n8n publish:workflow --id=eccDomainEventGw1']:
+  if n not in compose: fail(f'n8n compose bootstrap missing {n}')
+worker_block=compose.split('  worker:',1)[1].split('  n8n-init:',1)[0]
+if 'n8n:' not in worker_block or 'condition: service_healthy' not in worker_block: fail('worker must depend on healthy n8n')
 for n in ['brief.delivery_requested','daily_brief.prepare','daily-brief-delivery-requested']:
   if n not in text('apps/api/src/routes/domain-events.ts')+text('packages/event-engine/src/messaging-engine.ts'): fail(f'daily brief delivery integration missing {n}')
 workflow=text('n8n/workflows/ecc-domain-event-gateway.json')

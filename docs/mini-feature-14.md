@@ -160,6 +160,13 @@ Isso mantém o agendamento independente da disponibilidade/custo do LLM. O Agent
 
 ## Mensageria e n8n
 
+### Bootstrap do gateway no ambiente local
+
+O envio agendado depende do production webhook `POST /webhook/ecc-domain-events`. O arquivo JSON montado em `/files/n8n` é apenas a fonte do workflow; ele precisa existir no banco do n8n e estar publicado.
+
+O `compose.yaml` inclui `n8n-init`, um serviço one-shot que importa/publica `eccDomainEventGw1` antes do runtime do n8n. O `worker` também depende do n8n saudável, evitando iniciar o dispatcher enquanto o gateway ainda não subiu. Para alterações do workflow durante desenvolvimento, use `./scripts/n8n-sync.sh`.
+
+
 Quando `requestDelivery=true`, a mesma transação que persiste o brief grava:
 
 ```text
