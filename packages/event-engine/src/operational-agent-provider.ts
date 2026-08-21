@@ -403,6 +403,22 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
+    const eventDayTerm=/\b(event day|dia do evento|operacao do evento|evento ao vivo|evento agora)\b|como esta.*evento.*agora|como esta.*agora/.test(normalized)
+    if(eventDayTerm&&/\b(inicie|iniciar|comece|comecar|abra|abrir|ative|ativar)\b/.test(normalized)){
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('start_event_day',{eventId})
+    }
+    if(/\b(chegou|chegaram|esta no local|esta aqui|acabou de chegar)\b/.test(normalized)){
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('mark_event_day_vendor_arrived',{eventId,vendorReference:deterministicEventDayVendorReference(normalized)})
+    }
+    if(/\b(saiu|foram embora|foi embora|partiu|deixou o local)\b/.test(normalized)){
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('mark_event_day_vendor_departed',{eventId,vendorReference:deterministicEventDayVendorReference(normalized)})
+    }
+    if(eventDayTerm&&/\b(finalize|finalizar|conclua|concluir|encerre|encerrar|feche|fechar)\b/.test(normalized)){
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('complete_event_day',{eventId})
+    }
+    if(eventDayTerm){
+      const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('get_event_day_status',{eventId})
+    }
     const dMinus1Term=/\b(d-?1|dia anterior|vespera|briefing de vespera|briefing do dia anterior)\b/.test(normalized)
     if (dMinus1Term && /\b(qual|que)\b.*\b(horario|hora)\b|\b(configuracao|configuracoes)\b/.test(normalized)) return toolResponse('get_d_minus_1_settings', {})
     if (dMinus1Term && /configur|horario|hora|ativ|desativ|mande|envie|sempre|todos os eventos/.test(normalized)) {
@@ -449,6 +465,16 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
     }
     return toolResponse('get_workspace_overview', {})
   }
+}
+
+function deterministicEventDayVendorReference(normalized:string):string {
+  const aliases=[
+    ['fotogra','fotografia'],['foto','fotografia'],['buffet','buffet'],['decor','decoracao'],['dj','dj'],['banda','banda'],
+    ['video','video'],['film','video'],['bolo','bolo'],['doce','doces'],['celebr','celebrante'],['segur','seguranca'],['transport','transporte'],
+  ] as const
+  for(const [needle,value] of aliases)if(normalized.includes(needle))return value
+  const cleaned=normalized.replace(/\b(o|a|os|as|fornecedor|fornecedora|equipe|chegou|chegaram|saiu|foram embora|foi embora|esta no local|esta aqui|acabou de chegar)\b/g,' ').replace(/\s+/g,' ').trim()
+  return cleaned||normalized
 }
 
 function extractDeterministicBriefTime(normalized: string): string | null {

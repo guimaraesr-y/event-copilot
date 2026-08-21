@@ -26,3 +26,5 @@ export * from './risk.ts'
 export * from './health.ts'
 
 export * from './brief.ts'
+
+export * from './event-day.ts'

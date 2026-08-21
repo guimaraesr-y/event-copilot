@@ -126,6 +126,8 @@ export interface EventVendorsTable {
   payment_status: 'not_applicable' | 'pending' | 'partial' | 'paid' | 'overdue'
   arrival_at: ColumnType<Date | null, Date | string | null, Date | string | null>
   departure_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  actual_arrival_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
+  actual_departure_at: ColumnType<Date | null, Date | string | null | undefined, Date | string | null>
   team_size: number | null
   confirmation_requested_at: ColumnType<Date | null, Date | string | null, Date | string | null>
   confirmation_deadline_at: ColumnType<Date | null, Date | string | null, Date | string | null>
@@ -492,6 +494,33 @@ export interface DailyBriefsTable {
   delivery_requested_at: ColumnType<Date | null, Date | string | null, Date | string | null>
 }
 
+
+export interface EventDaySessionsTable {
+  id: string
+  organization_id: string
+  event_id: string
+  status: import('@ecc/domain').EventDaySessionStatus
+  started_at: ColumnType<Date, Date | string, Date | string>
+  completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  started_by_sender: string
+  completed_by_sender: string | null
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
+export interface EventDayActivityTable {
+  id: string
+  organization_id: string
+  event_id: string
+  session_id: string
+  event_vendor_id: string | null
+  type: import('@ecc/domain').EventDayActivityType
+  occurred_at: ColumnType<Date, Date | string, Date | string>
+  created_by_sender: string
+  note: string | null
+  created_at: ColumnType<Date, Date | string, never>
+}
+
 export interface DatabaseSchema {
   organizations: OrganizationsTable
   events: EventsTable
@@ -518,6 +547,8 @@ export interface DatabaseSchema {
   organization_brief_preferences: OrganizationBriefPreferencesTable
   organization_brief_schedules: OrganizationBriefSchedulesTable
   daily_briefs: DailyBriefsTable
+  event_day_sessions: EventDaySessionsTable
+  event_day_activity: EventDayActivityTable
   conversation_contexts: ConversationContextsTable
   event_notes: EventNotesTable
   activity_entries: ActivityEntriesTable

@@ -24,6 +24,7 @@ Este diretório concentra a documentação funcional e operacional do projeto.
 | 13 — Health Score | [mini-feature-13.md](mini-feature-13.md) |
 | 14 — Daily Command Brief | [mini-feature-14.md](mini-feature-14.md) |
 | 15 — Briefing D-1 | [mini-feature-15.md](mini-feature-15.md) |
+| 16 — Event Day Mode | [mini-feature-16.md](mini-feature-16.md) |
 
 ## Operação e benchmarks
 

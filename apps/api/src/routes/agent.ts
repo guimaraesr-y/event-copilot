@@ -6,6 +6,9 @@ import type { AgentTurn, AgentTurnStore } from '@ecc/domain'
 import {
   BriefNotFoundError,
   BriefValidationError,
+  EventDayConflictError,
+  EventDayNotFoundError,
+  EventDayValidationError,
   OperationalAgentConflictError,
   OperationalAgentLoopError,
   OperationalAgentProviderError,
@@ -322,6 +325,9 @@ function mapError(c: any, error: unknown) {
   if (error instanceof OperationalAgentValidationError) return c.json({ error: { code: error.code, message: error.message } }, 422)
   if (error instanceof BriefNotFoundError) return c.json({ error: { code: error.code, message: error.message } }, 404)
   if (error instanceof BriefValidationError) return c.json({ error: { code: error.code, message: error.message } }, 422)
+  if (error instanceof EventDayNotFoundError) return c.json({ error: { code: error.code, message: error.message } }, 404)
+  if (error instanceof EventDayConflictError) return c.json({ error: { code: error.code, message: error.message } }, 409)
+  if (error instanceof EventDayValidationError) return c.json({ error: { code: error.code, message: error.message } }, 422)
   if (error instanceof OperationalAgentProviderError) return c.json({ error: { code: error.code, message: error.message } }, 502)
   if (error instanceof OperationalAgentLoopError) return c.json({ error: { code: error.code, message: error.message } }, 502)
   throw error

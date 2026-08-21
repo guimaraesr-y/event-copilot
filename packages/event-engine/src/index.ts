@@ -30,3 +30,5 @@ export * from './risk-engine.ts'
 export * from './health-engine.ts'
 
 export * from './brief-engine.ts'
+
+export * from './event-day-engine.ts'

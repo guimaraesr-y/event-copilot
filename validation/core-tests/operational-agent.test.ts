@@ -87,6 +87,11 @@ class ScriptedProvider implements OperationalAgentProvider {
     this.sawHistory = this.sawHistory || input.messages.filter(m=>m.role==='user').length>1
     if(user.includes('meus eventos')) return tool('get_workspace_overview',{})
     if(user.includes('Laura')) return tool('select_event',{eventId:LAURA})
+    if(user.includes('Como está o evento agora')) return tool('get_event_day_status',{eventId:ANA})
+    if(user.includes('Inicie o Event Day')) return tool('start_event_day',{eventId:ANA})
+    if(user.includes('fotógrafo chegou')) return tool('mark_event_day_vendor_arrived',{eventId:ANA,vendorReference:'fotografia'})
+    if(user.includes('fotógrafo saiu')) return tool('mark_event_day_vendor_departed',{eventId:ANA,vendorReference:'fotografia'})
+    if(user.includes('Finalize o Event Day')) return tool('complete_event_day',{eventId:ANA})
     if(user.includes('Crie uma tarefa')) return tool('create_task',{eventId:ANA,title:'Confirmar buffet',dueAt:'2026-10-01T10:00:00-03:00'})
     if(user.includes('horário')) return tool('propose_event_time_change',{eventId:ANA,time:'17:00'})
     if(user.includes('Configure o briefing D-1')) return tool('configure_d_minus_1_brief',{enabled:true,localTime:'18:30',recipient:'+5521977776666'})
@@ -139,7 +144,15 @@ const briefEngine={
   async generateDMinus1(){return{brief:briefState.dMinus1,duplicate:false}},
   async listDMinus1(){return[briefState.dMinus1]}
 } as any
-const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,briefEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
+const eventDayState:any={snapshot:{organizationId:'org-1',eventId:ANA,eventName:'Ana & Pedro',timezone:'America/Sao_Paulo',now:fixedNow.toISOString(),operationalStatus:'not_started',session:null,event:{startAt:es.events[0]!.startAt.toISOString(),endAt:null,status:'planning',venueName:null,venueAddress:null,guestCount:100,healthScore:100},counts:{vendors:1,arrivedVendors:0,lateVendors:0,dueVendors:0,departedVendors:0,openTasks:0,overdueTasks:0,criticalOpenTasks:0},vendors:[{eventVendorId:'55555555-5555-4555-8555-555555555555',vendorName:'Foto Prime',category:'photo',confirmationStatus:'confirmed',plannedArrivalAt:null,plannedDepartureAt:null,actualArrivalAt:null,actualDepartureAt:null,liveStatus:'unscheduled',minutesLate:0}],tasks:[],timeline:[],nextActions:['Inicie o Event Day para registrar a execução ao vivo.']}}
+const eventDayEngine={
+  async get(){return eventDayState.snapshot},
+  async start(){eventDayState.snapshot={...eventDayState.snapshot,operationalStatus:'on_track',session:{id:'session-1',status:'active',startedAt:fixedNow.toISOString(),completedAt:null,startedBySender:'planner',completedBySender:null},event:{...eventDayState.snapshot.event,status:'event_day'},nextActions:['Operação dentro do planejado; acompanhar o próximo marco.']};return{snapshot:eventDayState.snapshot,duplicate:false}},
+  async markVendorArrived(){const v={...eventDayState.snapshot.vendors[0],actualArrivalAt:fixedNow.toISOString(),liveStatus:'arrived'};eventDayState.snapshot={...eventDayState.snapshot,vendors:[v],counts:{...eventDayState.snapshot.counts,arrivedVendors:1}};return{snapshot:eventDayState.snapshot,duplicate:false}},
+  async markVendorDeparted(){const v={...eventDayState.snapshot.vendors[0],actualDepartureAt:fixedNow.toISOString(),liveStatus:'departed'};eventDayState.snapshot={...eventDayState.snapshot,vendors:[v],counts:{...eventDayState.snapshot.counts,departedVendors:1}};return{snapshot:eventDayState.snapshot,duplicate:false}},
+  async complete(){eventDayState.snapshot={...eventDayState.snapshot,operationalStatus:'completed',session:{...eventDayState.snapshot.session,status:'completed',completedAt:fixedNow.toISOString(),completedBySender:'planner'},event:{...eventDayState.snapshot.event,status:'completed'}};return{snapshot:eventDayState.snapshot,duplicate:false}},
+} as any
+const agent=new OperationalAgent({store:as,provider,eventEngine,vendorEngine,commandEngine,changeProposalEngine,dependencyEngine,riskEngine,healthEngine,briefEngine,eventDayEngine,operations:{async listActivity(){return[]},async listInbox(){return[]}},now,newId:()=>`agent-${++seq}`,historyTurns:6})
 const base={organizationId:'org-1',organizationTimezone:'America/Sao_Paulo',sender:'planner'}
 
 {
@@ -273,6 +286,26 @@ let createdTurnId=''
   assert(r.turn.toolTrace[0]?.name==='generate_d_minus_1_brief'&&r.turn.modelCalls===1,'explicit D-1 generation uses deterministic reply without second model call')
 }
 {
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Como está o evento agora?',idempotencyKey:'agent-event-day-read'})
+  assert(r.turn.toolTrace[0]?.name==='get_event_day_status'&&r.turn.modelCalls===2,'agent reads live Event Day snapshot through deterministic read tool')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Inicie o Event Day deste evento',idempotencyKey:'agent-event-day-start'})
+  assert(r.turn.toolTrace[0]?.name==='start_event_day'&&r.turn.modelCalls===1,'explicit Event Day start is a guarded domain write')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'o fotógrafo chegou agora',idempotencyKey:'agent-event-day-arrival'})
+  assert(r.turn.toolTrace[0]?.name==='mark_event_day_vendor_arrived'&&eventDayState.snapshot.vendors[0]?.liveStatus==='arrived','agent records actual supplier arrival without changing planned schedule')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'o fotógrafo saiu agora',idempotencyKey:'agent-event-day-departure'})
+  assert(r.turn.toolTrace[0]?.name==='mark_event_day_vendor_departed'&&eventDayState.snapshot.vendors[0]?.liveStatus==='departed','agent records supplier departure explicitly')
+}
+{
+  const r=await agent.chat({...base,explicitEventId:ANA,text:'Finalize o Event Day deste evento',idempotencyKey:'agent-event-day-complete'})
+  assert(r.turn.toolTrace[0]?.name==='complete_event_day'&&eventDayState.snapshot.operationalStatus==='completed','explicit Event Day completion closes the event lifecycle')
+}
+{
   const {turn}=await as.createTurnIfAbsent({id:'stuck-turn',organizationId:'org-1',sender:'planner',idempotencyKey:'stuck-key',userText:'Como estão meus eventos?',provider:'ollama',model:'fake',now:fixedNow})
   await as.updateTurn('org-1',turn.id,{status:'processing',updatedAt:fixedNow})
   let conflict=false
@@ -280,4 +313,4 @@ let createdTurnId=''
   assert(conflict,'incomplete turn is never automatically replayed')
 }
 
-console.log('OperationalAgent: 26/26 behavioral scenarios passed')
+console.log('OperationalAgent: 31/31 behavioral scenarios passed')

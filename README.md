@@ -209,6 +209,14 @@ O schedule D-1 é independente do Daily Brief e pode ser configurado pelo Operat
 
 Detalhes: [docs/mini-feature-15.md](docs/mini-feature-15.md).
 
+## 🎬 Event Day Mode
+
+A Feature 16 adiciona execução ao vivo no dia do evento. O backend mantém uma sessão por evento, separa horários planejados (`arrivalAt`/`departureAt`) de horários reais (`actualArrivalAt`/`actualDepartureAt`) e calcula deterministicamente `not_started`, `on_track`, `attention`, `critical` ou `completed`.
+
+O snapshot reúne fornecedores, tarefas abertas, timeline planejada/real e `nextActions`. O Operational Agent pode consultar o estado, iniciar o Event Day, registrar chegada/saída de fornecedor e concluir o evento somente após comandos explícitos.
+
+Detalhes: [docs/mini-feature-16.md](docs/mini-feature-16.md).
+
 ## 🚀 Desenvolvimento local
 
 ```bash
@@ -231,7 +239,7 @@ No Windows com Git Bash, `scripts/n8n-sync.sh` desabilita automaticamente a conv
 
 ```bash
 python3 scripts/validate_foundation.py
-python3 scripts/validate_feature_14.py
+python3 scripts/validate_feature_16.py
 ```
 
 Smoke isolado e sem IA paga:
@@ -293,8 +301,8 @@ validation/              cenários comportamentais
 13 Health Score            ✅
 14 Daily Command Brief     ✅
 15 Briefing D-1            ✅
-16 Event Day Mode           próxima
-17 Dashboard
+16 Event Day Mode           ✅
+17 Dashboard                próxima
 
 Backlog
 - Voice / áudio

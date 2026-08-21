@@ -202,3 +202,22 @@ console.log('OperationalAgentProvider deterministic brief routing: 6/6 behaviora
   assert(read.toolCalls[0]?.name==='get_d_minus_1_brief'&&read.toolCalls[0]?.arguments.eventId===eventId,'deterministic provider routes readiness question to D-1 brief')
 }
 console.log('OperationalAgentProvider deterministic D-1 routing: 4/4 behavioral scenarios passed')
+
+{
+  const provider=new DeterministicOperationalAgentProvider()
+  const eventId='11111111-1111-4111-8111-111111111111'
+  const system={role:'system' as const,content:`EVENTO ATUAL DA CONVERSA\n${JSON.stringify({id:eventId,name:'Casamento'})}`}
+  const tools:any[]=[]
+  const complete=(content:string)=>provider.complete({messages:[system,{role:'user',content}],tools})
+  const read=await complete('Como está o evento agora?')
+  assert(read.toolCalls[0]?.name==='get_event_day_status'&&read.toolCalls[0]?.arguments.eventId===eventId,'deterministic provider routes live Event Day read')
+  const start=await complete('Inicie o Event Day deste evento')
+  assert(start.toolCalls[0]?.name==='start_event_day','deterministic provider routes explicit Event Day start')
+  const arrived=await complete('O fotógrafo chegou agora')
+  assert(arrived.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrived.toolCalls[0]?.arguments.vendorReference==='fotografia','deterministic provider routes supplier arrival with human reference')
+  const departed=await complete('O fotógrafo saiu agora')
+  assert(departed.toolCalls[0]?.name==='mark_event_day_vendor_departed','deterministic provider routes supplier departure')
+  const completed=await complete('Finalize o Event Day deste evento')
+  assert(completed.toolCalls[0]?.name==='complete_event_day','deterministic provider routes Event Day completion')
+}
+console.log('OperationalAgentProvider deterministic Event Day routing: 5/5 behavioral scenarios passed')

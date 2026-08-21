@@ -19,6 +19,7 @@ import { migration016RiskEngine } from './migrations/016_risk_engine.ts'
 import { migration017HealthScore } from './migrations/017_health_score.ts'
 import { migration018DailyBrief } from './migrations/018_daily_brief.ts'
 import { migration019DMinus1Brief } from './migrations/019_d_minus_1_brief.ts'
+import { migration020EventDayMode } from './migrations/020_event_day_mode.ts'
 
 const db = createDatabase()
 const migrator = new Migrator({
@@ -45,6 +46,7 @@ const migrator = new Migrator({
         '017_health_score': migration017HealthScore,
         '018_daily_brief': migration018DailyBrief,
         '019_d_minus_1_brief': migration019DMinus1Brief,
+        '020_event_day_mode': migration020EventDayMode,
       }
     },
   },

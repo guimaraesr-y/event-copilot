@@ -16,10 +16,11 @@ import {
   KyselyRiskStore,
   KyselyHealthStore,
   KyselyBriefStore,
+  KyselyEventDayStore,
   OrganizationRepository,
   type DatabaseSchema,
 } from '@ecc/database'
-import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent, ChangeProposalEngine, DependencyEngine, RiskEngine, HealthEngine, BriefEngine } from '@ecc/event-engine'
+import { EventEngine, VendorEngine, MessagingEngine, InboundEngine, RuleBasedSupplierResponseInterpreter, CommandEngine, OperationalAgent, ChangeProposalEngine, DependencyEngine, RiskEngine, HealthEngine, BriefEngine, EventDayEngine } from '@ecc/event-engine'
 import { registerHealthRoutes } from './routes/health.ts'
 import { registerOrganizationRoutes } from './routes/organizations.ts'
 import { registerEventRoutes } from './routes/events.ts'
@@ -39,6 +40,7 @@ import { registerDependencyRoutes } from './routes/dependencies.ts'
 import { registerRiskRoutes } from './routes/risks.ts'
 import { registerHealthScoreRoutes } from './routes/health-scores.ts'
 import { registerBriefRoutes } from './routes/briefs.ts'
+import { registerEventDayRoutes } from './routes/event-day.ts'
 import { createMessagingProvider, createMessagingWebhookRegistry } from '@ecc/messaging'
 
 export function createApp(db: Kysely<DatabaseSchema>) {
@@ -57,6 +59,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   const riskEngine = new RiskEngine({ store: new KyselyRiskStore(db) })
   const healthEngine = new HealthEngine({ store: new KyselyHealthStore(db) })
   const briefEngine = new BriefEngine({ store: new KyselyBriefStore(db) })
+  const eventDayEngine = new EventDayEngine({ store: new KyselyEventDayStore(db) })
   const agentStore = new KyselyAgentStore(db)
   const operationalAgent = new OperationalAgent({
     store: agentStore,
@@ -69,6 +72,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
     riskEngine,
     healthEngine,
     briefEngine,
+    eventDayEngine,
     operations: operationalRepository,
     ...operationalAgentLimits(),
   })
@@ -100,6 +104,7 @@ export function createApp(db: Kysely<DatabaseSchema>) {
   registerRiskRoutes(app, organizationRepository, riskEngine)
   registerHealthScoreRoutes(app, organizationRepository, healthEngine)
   registerBriefRoutes(app, organizationRepository, briefEngine)
+  registerEventDayRoutes(app, organizationRepository, eventDayEngine)
 
   return app
 }
