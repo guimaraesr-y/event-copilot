@@ -468,6 +468,10 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
 }
 
 function deterministicEventDayVendorReference(normalized:string):string {
+  // Git Bash/MSYS has corrupted UTF-8 in smoke scripts before (for example
+  // "saúde" -> "sa�de"). Keep the human parser tolerant to that transport
+  // damage without weakening the domain-side vendor ambiguity checks.
+  if (/\bfot(?:.|o)?graf|\bfotografia\b|\bfoto\b/.test(normalized)) return 'fotografia'
   const aliases=[
     ['fotogra','fotografia'],['foto','fotografia'],['buffet','buffet'],['decor','decoracao'],['dj','dj'],['banda','banda'],
     ['video','video'],['film','video'],['bolo','bolo'],['doce','doces'],['celebr','celebrante'],['segur','seguranca'],['transport','transporte'],

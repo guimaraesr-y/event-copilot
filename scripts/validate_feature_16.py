@@ -42,10 +42,13 @@ provider=require('packages/event-engine/src/operational-agent-provider.ts','get_
 smoke=require('scripts/smoke.sh','82/90 create Event Day smoke event','90/90 verify all generated domain events were acknowledged','actual_arrival_at','get_event_day_status','mark_event_day_vendor_arrived','complete_event_day')
 if "AND type='d_minus_1' AND event_id=" in smoke: fail('Feature 15 D-1 smoke regression: daily_briefs column must be brief_type')
 if '/82' in smoke: fail('smoke step denominator still contains /82')
+if 'O fotógrafo chegou agora' in smoke: fail('Event Day smoke must use ASCII-safe fornecedor wording under Git Bash')
+for n in ['COMPOSE_PROJECT_NAME','WHATSAPP_PROVIDER','API_WHATSAPP_PROVIDER','Use ./scripts/smoke-env.sh']:
+    if n not in smoke: fail(f'smoke safety guard missing {n}')
 
 require('validation/core-tests/event-day-engine.test.ts','8/8 behavioral scenarios passed','planned arrival is preserved','Event Day completion is idempotent')
 require('validation/core-tests/operational-agent.test.ts','31/31 behavioral scenarios passed','get_event_day_status','mark_event_day_vendor_arrived')
-require('validation/core-tests/operational-agent-provider.test.ts','deterministic Event Day routing: 5/5')
+require('validation/core-tests/operational-agent-provider.test.ts','deterministic Event Day routing: 7/7','O fotografo chegou agora','O fot�grafo chegou agora')
 require('docs/mini-feature-16.md','Mini Feature 16','Event Day Mode','actual_arrival_at','17 Dashboard')
 require('docs/README.md','16 — Event Day Mode')
 require('README.md','Event Day Mode','16 Event Day Mode           ✅','17 Dashboard                próxima')

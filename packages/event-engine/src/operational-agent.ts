@@ -1074,10 +1074,12 @@ function resolveEventDayVendor(snapshot:import('@ecc/domain').EventDaySnapshot,r
   const ref=normalizeDecisionText(reference)
   if(ref.length<2)throw new OperationalAgentValidationError('vendorReference must identify a vendor')
   const aliases:Record<string,string[]>={photo:['foto','fotografo','fotografia'],video:['video','filmagem','videomaker'],decoration:['decoracao','decorador'],dj:['dj'],band:['banda'],buffet:['buffet','catering'],cake:['bolo'],sweets:['doces','doce'],venue:['local','espaco','venue'],transport:['transporte'],celebrant:['celebrante'],security:['seguranca']}
+  const photoLike=/\bfot(?:.|o)?graf|\bfotografia\b|\bfoto\b/.test(ref)
   const matches=snapshot.vendors.filter(v=>{
     const name=normalizeDecisionText(v.vendorName),category=normalizeDecisionText(v.category)
     if(name===ref||name.includes(ref)||ref.includes(name))return true
     if(category===ref)return true
+    if(v.category==='photo'&&photoLike)return true
     return (aliases[v.category]??[]).some(alias=>ref.includes(alias)||alias.includes(ref))
   })
   if(matches.length===1)return matches[0]!

@@ -4,6 +4,33 @@ set -eu
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 OUTBOX_WAIT_SECONDS="${OUTBOX_WAIT_SECONDS:-30}"
 
+# Smoke must never run against the developer/production messaging stack.
+case "${COMPOSE_PROJECT_NAME:-}" in
+  *smoke*) ;;
+  *)
+    echo "Refusing to run smoke.sh outside an isolated smoke Compose project. Use ./scripts/smoke-env.sh." >&2
+    exit 1
+    ;;
+esac
+
+if [ "${WHATSAPP_PROVIDER:-}" != "mock" ]; then
+  echo "Refusing to run smoke.sh unless WHATSAPP_PROVIDER=mock. Use ./scripts/smoke-env.sh." >&2
+  exit 1
+fi
+if [ "${OPERATIONAL_AGENT_PROVIDER:-}" != "deterministic" ]; then
+  echo "Refusing to run smoke.sh unless OPERATIONAL_AGENT_PROVIDER=deterministic. Use ./scripts/smoke-env.sh." >&2
+  exit 1
+fi
+
+# Verify the already-running API container received the same safe provider. This
+# catches stale/reused containers even when the host shell variables are correct.
+API_WHATSAPP_PROVIDER=$(docker compose exec -T api sh -lc 'printf "%s" "${WHATSAPP_PROVIDER:-}"' 2>/dev/null | tr -d '\r[:space:]')
+if [ "$API_WHATSAPP_PROVIDER" != "mock" ]; then
+  echo "Refusing to run: API container WHATSAPP_PROVIDER is '$API_WHATSAPP_PROVIDER', expected 'mock'." >&2
+  echo "Recreate the smoke stack with ./scripts/smoke-env.sh before retrying." >&2
+  exit 1
+fi
+
 post_mock_provider_status() {
   external_id="$1"
   status="$2"
@@ -747,7 +774,7 @@ printf '%s' "$AGENT_EVENT_DAY" | grep -q 'get_event_day_status' || { echo "agent
 echo OK
 
 printf '86/90 record supplier arrival through Operational Agent... '
-AGENT_EVENT_DAY_ARRIVAL=$(curl -fsS -X POST "$BASE_URL/api/v1/agent/messages" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"event-day-agent\",\"eventId\":\"$EVENT_DAY_EVENT_ID\",\"text\":\"O fotógrafo chegou agora\",\"idempotencyKey\":\"smoke-event-day-arrival-1\"}")
+AGENT_EVENT_DAY_ARRIVAL=$(curl -sS -X POST "$BASE_URL/api/v1/agent/messages" -H 'content-type: application/json' -H "x-organization-id: $ORG_ID" -d "{\"sender\":\"event-day-agent\",\"eventId\":\"$EVENT_DAY_EVENT_ID\",\"text\":\"O fotografo chegou agora\",\"idempotencyKey\":\"smoke-event-day-arrival-1\"}")
 printf '%s' "$AGENT_EVENT_DAY_ARRIVAL" | grep -q 'mark_event_day_vendor_arrived' || { echo "agent did not register supplier arrival: $AGENT_EVENT_DAY_ARRIVAL"; exit 1; }
 echo OK
 
