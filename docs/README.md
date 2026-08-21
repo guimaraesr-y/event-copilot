@@ -25,6 +25,7 @@ Este diretório concentra a documentação funcional e operacional do projeto.
 | 14 — Daily Command Brief | [mini-feature-14.md](mini-feature-14.md) |
 | 15 — Briefing D-1 | [mini-feature-15.md](mini-feature-15.md) |
 | 16 — Event Day Mode | [mini-feature-16.md](mini-feature-16.md) |
+| 16.1 — Event Day Operations | [mini-feature-16-1.md](mini-feature-16-1.md) |
 
 ## Operação e benchmarks
 

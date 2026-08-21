@@ -2,6 +2,8 @@
 
 **Versão:** `0.16.0`
 
+> **Atualização 16.1:** a semântica de sessão/lifecycle desta versão foi evoluída em [mini-feature-16-1.md](mini-feature-16-1.md). Event Day agora é opt-in por evento, aceita múltiplas sessões históricas e concluir uma sessão restaura o status anterior do evento em vez de marcar automaticamente o evento como `completed`.
+
 ## Objetivo
 
 Transformar o Event Command Center de um sistema de preparação para um sistema de execução ao vivo no dia do evento.

@@ -373,7 +373,27 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
     // occasionally reach the API with U+FFFD. Keep the deterministic provider tolerant
     // to that transport degradation; production AI providers still receive the raw text.
     const healthTerm = /health|sa(?:u|\uFFFD)de/.test(normalized)
-    if (normalized.includes('crie uma tarefa')) {
+    const eventDayTerm=/\b(event day|dia do evento|operacao do evento|evento ao vivo|evento agora)\b|como esta.*evento.*agora|como esta.*agora/.test(normalized)
+    const eventIdForLive=currentEventId(input.messages)??firstEventId(input.messages)
+    if(eventDayTerm&&/\b(desative|desativar|desabilite|desabilitar|desligue|desligar)\b/.test(normalized)&&eventIdForLive)return toolResponse('disable_event_day',{eventId:eventIdForLive})
+    if(eventDayTerm&&/\b(ative|ativar|habilite|habilitar|ligue|ligar)\b/.test(normalized)&&eventIdForLive)return toolResponse('enable_event_day',{eventId:eventIdForLive})
+    if(/\b(resolvemos|resolvido|resolvida|corrigimos|normalizou|solucionado)\b/.test(normalized)&&/\b(problema|incidente|complicacao|imprevisto|gerador|energia|luz|som)\b/.test(normalized)&&eventIdForLive){
+      return toolResponse('resolve_event_day_incident',{eventId:eventIdForLive,taskReference:deterministicEventDayTaskReference(normalized)})
+    }
+    if(/\b(problema|incidente|complicacao|imprevisto|deu errado|falhou|parou|quebrou|sem energia|sem luz)\b/.test(normalized)&&eventIdForLive){
+      return toolResponse('create_event_day_task',{eventId:eventIdForLive,title:deterministicEventDayTaskTitle(user,normalized),kind:'incident',priority:/\b(critico|critica|urgente|parou|sem energia|sem luz)\b/.test(normalized)?'critical':'high'})
+    }
+    if(eventDayTerm&&/\b(crie|criar|adicione|adicionar|inclua|incluir|registre|registrar|precisamos|temos que)\b/.test(normalized)&&/\b(tarefa|task|checklist)\b/.test(normalized)&&eventIdForLive){
+      const kind=/\bchecklist\b/.test(normalized)?'checklist':'operation'
+      return toolResponse('create_event_day_task',{eventId:eventIdForLive,title:deterministicEventDayTaskTitle(user,normalized),kind,priority:/\b(critica|critico|urgente)\b/.test(normalized)?'critical':/\b(alta|high)\b/.test(normalized)?'high':'normal'})
+    }
+    if(eventDayTerm&&(/\b(conclua|concluir|complete|completar|finalize|finalizar|marque).*(tarefa|task)/.test(normalized)||/\b(tarefa|task).*(concluida|concluido|feito|pronto)\b/.test(normalized))&&eventIdForLive){
+      return toolResponse('complete_event_day_task',{eventId:eventIdForLive,taskReference:deterministicEventDayTaskReference(normalized)})
+    }
+    if(eventDayTerm&&(/\b(inicie|iniciar|comece|comecar|marque).*(tarefa|task)/.test(normalized)||/\b(tarefa|task).*(andamento|inicie|comece)\b/.test(normalized))&&eventIdForLive){
+      return toolResponse('start_event_day_task',{eventId:eventIdForLive,taskReference:deterministicEventDayTaskReference(normalized)})
+    }
+    if (normalized.includes('crie uma tarefa') && !eventDayTerm) {
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       const dueAt = user.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})/)?.[0]
       if (!eventId || !dueAt) {
@@ -403,8 +423,7 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
       const eventId = currentEventId(input.messages) ?? firstEventId(input.messages)
       if (eventId) return toolResponse('evaluate_event_risks', { eventId })
     }
-    const eventDayTerm=/\b(event day|dia do evento|operacao do evento|evento ao vivo|evento agora)\b|como esta.*evento.*agora|como esta.*agora/.test(normalized)
-    if(eventDayTerm&&/\b(inicie|iniciar|comece|comecar|abra|abrir|ative|ativar)\b/.test(normalized)){
+    if(eventDayTerm&&/\b(inicie|iniciar|comece|comecar|abra|abrir)\b/.test(normalized)){
       const eventId=currentEventId(input.messages)??firstEventId(input.messages);if(eventId)return toolResponse('start_event_day',{eventId})
     }
     if(/\b(chegou|chegaram|esta no local|esta aqui|acabou de chegar)\b/.test(normalized)){
@@ -465,6 +484,21 @@ export class DeterministicOperationalAgentProvider implements OperationalAgentPr
     }
     return toolResponse('get_workspace_overview', {})
   }
+}
+
+function deterministicEventDayTaskTitle(user:string,normalized:string):string {
+  const colon=user.indexOf(':')
+  if(colon>=0&&user.slice(colon+1).trim().length>=2)return user.slice(colon+1).trim().replace(/[.!?]+$/,'')
+  const match=normalized.match(/(?:tarefa|task|checklist)(?:\s+de\s+event\s+day|\s+do\s+event\s+day)?\s+(?:para\s+)?(.+)/)
+  if(match?.[1])return match[1].replace(/\b(como concluida|como concluido|em andamento)\b.*$/,'').trim()
+  const need=normalized.match(/(?:precisamos|temos que)\s+(.+)/)
+  if(need?.[1])return need[1].trim()
+  return normalized.replace(/\b(crie|criar|adicione|adicionar|inclua|incluir|registre|registrar|uma|um|tarefa|task|checklist|no|na|event day|dia do evento)\b/g,' ').replace(/\s+/g,' ').trim()||'Ação operacional'
+}
+function deterministicEventDayTaskReference(normalized:string):string {
+  const known=['gerador','microfone','som','cadeira','mesa','entrada','padrinhos','buffet','fotografo','fotografia']
+  for(const value of known)if(normalized.includes(value))return value
+  return normalized.replace(/\b(resolvemos|resolvido|resolvida|problema|incidente|complicacao|imprevisto|marque|tarefa|task|como|concluida|concluido|inicie|comece|event day|dia do evento|do|da|o|a)\b/g,' ').replace(/\s+/g,' ').trim()||normalized
 }
 
 function deterministicEventDayVendorReference(normalized:string):string {

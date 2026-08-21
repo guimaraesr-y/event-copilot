@@ -206,22 +206,33 @@ console.log('OperationalAgentProvider deterministic D-1 routing: 4/4 behavioral 
 {
   const provider=new DeterministicOperationalAgentProvider()
   const eventId='11111111-1111-4111-8111-111111111111'
-  const system={role:'system' as const,content:`EVENTO ATUAL DA CONVERSA\n${JSON.stringify({id:eventId,name:'Casamento'})}`}
+  const system={role:'system' as const,content:`EVENTO ATUAL DA CONVERSA
+${JSON.stringify({id:eventId,name:'Casamento'})}`}
   const tools:any[]=[]
   const complete=(content:string)=>provider.complete({messages:[system,{role:'user',content}],tools})
   const read=await complete('Como está o evento agora?')
   assert(read.toolCalls[0]?.name==='get_event_day_status'&&read.toolCalls[0]?.arguments.eventId===eventId,'deterministic provider routes live Event Day read')
+  const enabled=await complete('Ative o Event Day deste evento')
+  assert(enabled.toolCalls[0]?.name==='enable_event_day','activation enables capability without starting session')
   const start=await complete('Inicie o Event Day deste evento')
-  assert(start.toolCalls[0]?.name==='start_event_day','deterministic provider routes explicit Event Day start')
-  const arrived=await complete('O fotógrafo chegou agora')
-  assert(arrived.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrived.toolCalls[0]?.arguments.vendorReference==='fotografia','deterministic provider routes supplier arrival with human reference')
+  assert(start.toolCalls[0]?.name==='start_event_day','explicit start opens live session')
+  const task=await complete('Crie uma tarefa no Event Day para conferir o gerador')
+  assert(task.toolCalls[0]?.name==='create_event_day_task'&&task.toolCalls[0]?.arguments.kind==='operation','deterministic provider routes operational task creation')
+  const incident=await complete('Estamos com um problema no Event Day: o gerador parou')
+  assert(incident.toolCalls[0]?.name==='create_event_day_task'&&incident.toolCalls[0]?.arguments.kind==='incident','live complication becomes an incident task')
+  const resolved=await complete('Resolvemos o problema do gerador')
+  assert(resolved.toolCalls[0]?.name==='resolve_event_day_incident','incident resolution is explicit')
   const arrivedAscii=await complete('O fotografo chegou agora')
-  assert(arrivedAscii.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrivedAscii.toolCalls[0]?.arguments.vendorReference==='fotografia','deterministic provider routes ASCII-safe supplier arrival')
+  assert(arrivedAscii.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrivedAscii.toolCalls[0]?.arguments.vendorReference==='fotografia','ASCII-safe supplier arrival is routed')
   const arrivedCorrupted=await complete('O fot�grafo chegou agora')
-  assert(arrivedCorrupted.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrivedCorrupted.toolCalls[0]?.arguments.vendorReference==='fotografia','deterministic provider tolerates replacement-char UTF-8 damage')
+  assert(arrivedCorrupted.toolCalls[0]?.name==='mark_event_day_vendor_arrived'&&arrivedCorrupted.toolCalls[0]?.arguments.vendorReference==='fotografia','replacement-char UTF-8 damage is tolerated')
+  const completeTask=await complete('Marque a tarefa conferir o gerador como concluida no Event Day')
+  assert(completeTask.toolCalls[0]?.name==='complete_event_day_task','operational task completion is routed')
   const departed=await complete('O fotógrafo saiu agora')
-  assert(departed.toolCalls[0]?.name==='mark_event_day_vendor_departed','deterministic provider routes supplier departure')
+  assert(departed.toolCalls[0]?.name==='mark_event_day_vendor_departed','supplier departure is routed')
   const completed=await complete('Finalize o Event Day deste evento')
-  assert(completed.toolCalls[0]?.name==='complete_event_day','deterministic provider routes Event Day completion')
+  assert(completed.toolCalls[0]?.name==='complete_event_day','Event Day session completion is routed')
+  const disabled=await complete('Desative o Event Day deste evento')
+  assert(disabled.toolCalls[0]?.name==='disable_event_day','Event Day can be explicitly disabled per event')
 }
-console.log('OperationalAgentProvider deterministic Event Day routing: 7/7 behavioral scenarios passed')
+console.log('OperationalAgentProvider deterministic Event Day routing: 12/12 behavioral scenarios passed')

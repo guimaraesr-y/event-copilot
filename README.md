@@ -211,11 +211,13 @@ Detalhes: [docs/mini-feature-15.md](docs/mini-feature-15.md).
 
 ## 🎬 Event Day Mode
 
-A Feature 16 adiciona execução ao vivo no dia do evento. O backend mantém uma sessão por evento, separa horários planejados (`arrivalAt`/`departureAt`) de horários reais (`actualArrivalAt`/`actualDepartureAt`) e calcula deterministicamente `not_started`, `on_track`, `attention`, `critical` ou `completed`.
+A Feature 16 adiciona execução ao vivo no dia do evento. O backend separa horários planejados (`arrivalAt`/`departureAt`) de horários reais (`actualArrivalAt`/`actualDepartureAt`) e calcula deterministicamente o estado operacional.
 
-O snapshot reúne fornecedores, tarefas abertas, timeline planejada/real e `nextActions`. O Operational Agent pode consultar o estado, iniciar o Event Day, registrar chegada/saída de fornecedor e concluir o evento somente após comandos explícitos.
+A Feature 16.1 torna o Event Day **opt-in por evento**. Habilitar a capacidade não inicia a sessão; iniciar abre a operação ao vivo; concluir a sessão restaura o status anterior do evento e **não** conclui o evento de negócio. Desativar durante uma sessão encerra somente aquela sessão e não interfere em outros eventos da organização.
 
-Detalhes: [docs/mini-feature-16.md](docs/mini-feature-16.md).
+Tasks operacionais reutilizam `event_tasks` como source of truth com `phase=event_day` e `kind=checklist | operation | incident`. Incidentes abertos participam do status ao vivo e das `nextActions`, e podem ser resolvidos explicitamente pelo Operational Agent.
+
+Detalhes: [docs/mini-feature-16.md](docs/mini-feature-16.md) e [docs/mini-feature-16-1.md](docs/mini-feature-16-1.md).
 
 ## 🚀 Desenvolvimento local
 
@@ -302,6 +304,7 @@ validation/              cenários comportamentais
 14 Daily Command Brief     ✅
 15 Briefing D-1            ✅
 16 Event Day Mode           ✅
+16.1 Event Day Operations   ✅
 17 Dashboard                próxima
 
 Backlog

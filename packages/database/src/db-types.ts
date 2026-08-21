@@ -77,6 +77,8 @@ export interface EventTasksTable {
   priority: 'low' | 'normal' | 'high' | 'critical'
   due_at: ColumnType<Date, Date | string, Date | string>
   source: 'manual' | 'template' | 'automation' | 'dependency' | 'ai'
+  phase: Generated<'planning' | 'event_day'>
+  event_day_kind: Generated<import('@ecc/domain').EventDayTaskKind | null>
   created_at: ColumnType<Date, Date | string, never>
   updated_at: ColumnType<Date, Date | string, Date | string>
   completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
@@ -495,13 +497,24 @@ export interface DailyBriefsTable {
 }
 
 
+export interface EventDaySettingsTable {
+  organization_id: string
+  event_id: string
+  enabled: boolean
+  updated_by_sender: string
+  created_at: ColumnType<Date, Date | string, never>
+  updated_at: ColumnType<Date, Date | string, Date | string>
+}
+
 export interface EventDaySessionsTable {
   id: string
   organization_id: string
   event_id: string
   status: import('@ecc/domain').EventDaySessionStatus
+  previous_event_status: import('@ecc/domain').EventStatus
   started_at: ColumnType<Date, Date | string, Date | string>
   completed_at: ColumnType<Date | null, Date | string | null, Date | string | null>
+  completion_reason: import('@ecc/domain').EventDayCompletionReason | null
   started_by_sender: string
   completed_by_sender: string | null
   created_at: ColumnType<Date, Date | string, never>
@@ -547,6 +560,7 @@ export interface DatabaseSchema {
   organization_brief_preferences: OrganizationBriefPreferencesTable
   organization_brief_schedules: OrganizationBriefSchedulesTable
   daily_briefs: DailyBriefsTable
+  event_day_settings: EventDaySettingsTable
   event_day_sessions: EventDaySessionsTable
   event_day_activity: EventDayActivityTable
   conversation_contexts: ConversationContextsTable

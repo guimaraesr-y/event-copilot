@@ -288,6 +288,42 @@ const TOOLS: AgentToolDefinition[] = [
     parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
   },
   {
+    name: 'enable_event_day',
+    description: 'Enable Event Day operations for one event without starting a live session. Only call when the CURRENT user explicitly asks to enable/activate Event Day for that event.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'disable_event_day',
+    description: 'Disable Event Day operations for one event. If a live session is active it is safely closed and the prior event lifecycle status is restored. Only call on an explicit CURRENT request.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
+  },
+  {
+    name: 'create_event_day_task',
+    description: 'Create an operational Event Day task/checklist item/incident. Use only when the CURRENT user explicitly asks to create/record work to perform or explicitly reports an operational incident.',
+    parameters: objectSchema({
+      eventId: stringSchema('Exact event UUID.'),
+      title: stringSchema('Concise operational task or incident title.'),
+      kind: { type: 'string', enum: ['checklist','operation','incident'] },
+      priority: { type: 'string', enum: ['low','normal','high','critical'] },
+      dueAt: { type: ['string','null'], description: 'Optional RFC3339 due time. Omit/null when the task is due now or at event start.' },
+    }, ['eventId','title','kind']),
+  },
+  {
+    name: 'start_event_day_task',
+    description: 'Mark an Event Day task as in progress after an explicit CURRENT request.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), taskReference: stringSchema('Task title/reference from the user.') }, ['eventId','taskReference']),
+  },
+  {
+    name: 'complete_event_day_task',
+    description: 'Mark an Event Day task as completed after an explicit CURRENT request.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), taskReference: stringSchema('Task title/reference from the user.') }, ['eventId','taskReference']),
+  },
+  {
+    name: 'resolve_event_day_incident',
+    description: 'Resolve an Event Day incident after the CURRENT user explicitly says the complication/problem has been resolved.',
+    parameters: objectSchema({ eventId: stringSchema('Exact event UUID.'), taskReference: stringSchema('Incident title/reference from the user.') }, ['eventId','taskReference']),
+  },
+  {
     name: 'start_event_day',
     description: 'Start Event Day Mode for an event. Only call when the CURRENT user explicitly asks to start/begin Event Day operations.',
     parameters: objectSchema({ eventId: stringSchema('Exact event UUID from the event catalog.') }, ['eventId']),
@@ -314,7 +350,7 @@ const TOOLS: AgentToolDefinition[] = [
   },
 ]
 
-const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health','generate_daily_brief','configure_daily_brief','generate_d_minus_1_brief','configure_d_minus_1_brief','start_event_day','mark_event_day_vendor_arrived','mark_event_day_vendor_departed','complete_event_day'])
+const WRITE_TOOLS = new Set(['select_event','create_task','complete_task','add_event_note','propose_event_date_change','propose_event_time_change','propose_guest_count_change','propose_venue_change','approve_change_proposal','reject_change_proposal','apply_dependency_suggestion','apply_dependency_suggestions','resolve_dependency_review','evaluate_event_risks','acknowledge_risk','evaluate_event_health','generate_daily_brief','configure_daily_brief','generate_d_minus_1_brief','configure_d_minus_1_brief','enable_event_day','disable_event_day','start_event_day','mark_event_day_vendor_arrived','mark_event_day_vendor_departed','create_event_day_task','start_event_day_task','complete_event_day_task','resolve_event_day_incident','complete_event_day'])
 
 export class OperationalAgent {
   private readonly now: () => Date
@@ -778,7 +814,21 @@ export class OperationalAgent {
         assertNoUnexpectedKeys(call.arguments,['eventId'])
         const event=requireEvent(events,requiredString(call.arguments,'eventId'))
         const snapshot=await this.deps.eventDayEngine.get(input.organizationId,event.id)
-        return {eventDay:serializeEventDayForAgent(snapshot)}
+        return {reply:eventDaySnapshotReply(event.name,snapshot),eventDay:serializeEventDayForAgent(snapshot)}
+      }
+      case 'enable_event_day': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        if(!isExplicitEventDayEnable(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to enable Event Day')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const result=await this.deps.eventDayEngine.enable({organizationId:input.organizationId,eventId:event.id,sender:input.sender})
+        return {reply:`Event Day habilitado para ${event.name}. Ele continua separado dos demais eventos e só entra em execução quando você iniciar a sessão.`,duplicate:result.duplicate,eventDay:serializeEventDayForAgent(result.snapshot)}
+      }
+      case 'disable_event_day': {
+        assertNoUnexpectedKeys(call.arguments,['eventId'])
+        if(!isExplicitEventDayDisable(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to disable Event Day')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const result=await this.deps.eventDayEngine.disable({organizationId:input.organizationId,eventId:event.id,sender:input.sender})
+        return {reply:`Event Day desativado para ${event.name}. A gestão ao vivo foi encerrada sem concluir o evento e os outros eventos continuam independentes.`,duplicate:result.duplicate,eventDay:serializeEventDayForAgent(result.snapshot)}
       }
       case 'start_event_day': {
         assertNoUnexpectedKeys(call.arguments,['eventId'])
@@ -805,12 +855,52 @@ export class OperationalAgent {
         const result=await this.deps.eventDayEngine.markVendorDeparted({organizationId:input.organizationId,eventId:event.id,eventVendorId:vendor.eventVendorId,sender:input.sender})
         return {reply:`Saída de ${vendor.vendorName} registrada agora.`,duplicate:result.duplicate,eventDay:serializeEventDayForAgent(result.snapshot)}
       }
+      case 'create_event_day_task': {
+        assertNoUnexpectedKeys(call.arguments,['eventId','title','kind','priority','dueAt'])
+        const kind=optionalEnum(call.arguments,'kind',['checklist','operation','incident'] as const)??'operation'
+        if(kind==='incident'){
+          if(!isExplicitEventDayIncident(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly report an Event Day incident')
+        }else if(!isExplicitEventDayTaskCreation(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to create an Event Day task')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const dueAt=optionalRfc3339(call.arguments,'dueAt')
+        const priority=optionalEnum(call.arguments,'priority',['low','normal','high','critical'] as const)??undefined
+        const result=await this.deps.eventDayEngine.createTask({organizationId:input.organizationId,eventId:event.id,sender:input.sender,title:requiredString(call.arguments,'title'),kind,priority,dueAt:dueAt?new Date(dueAt):undefined,source:'ai'})
+        const label=kind==='incident'?'Incidente registrado':'Task de Event Day criada'
+        return {reply:`${label}: ${result.task.title}. Prioridade ${result.task.priority}.`,duplicate:result.duplicate,eventDayTask:result.task,eventDay:serializeEventDayForAgent(result.snapshot)}
+      }
+      case 'start_event_day_task': {
+        assertNoUnexpectedKeys(call.arguments,['eventId','taskReference'])
+        if(!isExplicitEventDayTaskStart(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to start an Event Day task')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const current=await this.deps.eventDayEngine.get(input.organizationId,event.id)
+        const task=resolveEventDayTask(current,requiredString(call.arguments,'taskReference'))
+        const result=await this.deps.eventDayEngine.startTask({organizationId:input.organizationId,eventId:event.id,taskId:task.id,sender:input.sender})
+        return {reply:`Task em andamento: ${result.task.title}.`,duplicate:result.duplicate,eventDayTask:result.task,eventDay:serializeEventDayForAgent(result.snapshot)}
+      }
+      case 'complete_event_day_task': {
+        assertNoUnexpectedKeys(call.arguments,['eventId','taskReference'])
+        if(!isExplicitEventDayTaskCompletion(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to complete an Event Day task')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const current=await this.deps.eventDayEngine.get(input.organizationId,event.id)
+        const task=resolveEventDayTask(current,requiredString(call.arguments,'taskReference'))
+        const result=await this.deps.eventDayEngine.completeTask({organizationId:input.organizationId,eventId:event.id,taskId:task.id,sender:input.sender})
+        return {reply:`Task concluída: ${result.task.title}.`,duplicate:result.duplicate,eventDayTask:result.task,eventDay:serializeEventDayForAgent(result.snapshot)}
+      }
+      case 'resolve_event_day_incident': {
+        assertNoUnexpectedKeys(call.arguments,['eventId','taskReference'])
+        if(!isExplicitEventDayIncidentResolution(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly say the Event Day incident was resolved')
+        const event=requireEvent(events,requiredString(call.arguments,'eventId'))
+        const current=await this.deps.eventDayEngine.get(input.organizationId,event.id)
+        const task=resolveEventDayTask(current,requiredString(call.arguments,'taskReference'),'incident')
+        const result=await this.deps.eventDayEngine.resolveIncident({organizationId:input.organizationId,eventId:event.id,taskId:task.id,sender:input.sender})
+        return {reply:`Incidente resolvido: ${result.task.title}. Estado operacional: ${eventDayStatusLabel(result.snapshot.operationalStatus)}.`,duplicate:result.duplicate,eventDayTask:result.task,eventDay:serializeEventDayForAgent(result.snapshot)}
+      }
       case 'complete_event_day': {
         assertNoUnexpectedKeys(call.arguments,['eventId'])
         if(!isExplicitEventDayCompletion(input.text))throw new OperationalAgentValidationError('Current user message does not explicitly ask to complete Event Day')
         const event=requireEvent(events,requiredString(call.arguments,'eventId'))
         const result=await this.deps.eventDayEngine.complete({organizationId:input.organizationId,eventId:event.id,sender:input.sender})
-        return {reply:`Event Day de ${event.name} concluído e evento marcado como concluído.`,duplicate:result.duplicate,eventDay:serializeEventDayForAgent(result.snapshot)}
+        return {reply:`Sessão Event Day de ${event.name} concluída. O evento não foi marcado como concluído; voltou ao estado anterior do ciclo de planejamento.`,duplicate:result.duplicate,eventDay:serializeEventDayForAgent(result.snapshot)}
       }
       case 'acknowledge_risk': {
         assertNoUnexpectedKeys(call.arguments,['riskId'])
@@ -888,7 +978,7 @@ function commandToolReply(result: Record<string, unknown>): string | null {
 function buildSystemPrompt(timezone: string, now: Date): string {
   const localNow = new Intl.DateTimeFormat('pt-BR', { timeZone: timezone, dateStyle: 'full', timeStyle: 'long' }).format(now)
   return `Você é o Operational Agent do Event Command Center, copiloto de um cerimonialista.\n\nCONTEXTO TEMPORAL\n- timezone da organização: ${timezone}\n- agora: ${localNow}\n- agora em ISO UTC: ${now.toISOString()}\n\nREGRAS\n1. Converse naturalmente em português brasileiro e mantenha contexto entre mensagens.\n2. Você pode raciocinar sobre vários eventos do tenant. Use as ferramentas para obter fatos atuais; nunca invente estado operacional.\n3. Para comparar ou resumir vários eventos, prefira get_workspace_overview. Para um evento específico, prefira get_event_details.\n4. Só execute ferramentas de escrita quando o usuário pedir explicitamente a alteração. Nunca transforme uma sugestão sua em ação automática.\n5. Escritas operacionais comuns usam select_event, create_task, complete_task e add_event_note e passam pelo CommandEngine.\n6. Data, horário, quantidade de convidados e local/endereço são mudanças sensíveis: NUNCA altere diretamente. Quando o usuário pedir explicitamente uma delas, use a ferramenta propose_* correspondente. A proposta calcula impactos e NÃO aplica a mudança.\n7. Uma proposta só pode ser aplicada com approve_change_proposal após uma mensagem ATUAL de aprovação explícita do usuário. Se houver uma proposta pendente no contexto e o usuário disser apenas 'sim', 'aprova', 'pode aplicar' ou equivalente inequívoco, você pode aprová-la. Para rejeição explícita use reject_change_proposal.\n8. Se faltarem dados necessários para escrever (por exemplo prazo da tarefa ou novo local), faça uma pergunta curta em vez de adivinhar.\n9. UUIDs são detalhes internos. Não exponha IDs ao usuário na resposta final salvo se ele pedir.\n10. Se uma ferramenta retornar not found, ambiguidade, needs_review ou erro, explique e peça somente o dado necessário.\n11. Depois de uma escrita bem-sucedida, confirme exatamente o que foi alterado.\n12. Seja objetivo: normalmente 1 a 5 frases, salvo quando o usuário pedir análise detalhada.\n13. Riscos são calculados deterministicamente pelo backend. Use get_event_risks/get_workspace_risks para priorização; nunca invente score ou severidade.\n14. acknowledge_risk apenas registra ciência do usuário e NÃO resolve a causa. Só use após reconhecimento explícito. evaluate_event_risks só pode ser chamado se o usuário pedir uma reavaliação explícita.\n15. Health Score é calculado deterministicamente pelo backend a partir dos riscos ativos. Use get_event_health/get_workspace_health para saúde operacional; nunca invente score, tendência ou breakdown. evaluate_event_health exige pedido explícito do usuário.\n16. Daily Brief é gerado deterministicamente pelo backend. Use get_daily_brief para prioridades do dia e get_daily_brief_settings para agenda. Só altere horário/ativação/destinatário com configure_daily_brief após pedido explícito. O horário é sempre no timezone da organização.
-17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.\n18. Se o turno anterior pediu especificamente o número de WhatsApp para concluir a ativação do Daily Brief, uma resposta curta contendo apenas o número (por exemplo "envie para 21999999999") é continuação válida: use configure_daily_brief com recipient e não exija que o usuário repita "brief diário".\n19. Briefing D-1 é específico por evento e representa prontidão para a véspera. Use get_d_minus_1_brief para readiness/checklist/cronograma, generate_d_minus_1_brief somente com pedido explícito, e configure_d_minus_1_brief para o horário/ativação do envio na véspera. Readiness é calculado deterministicamente pelo backend; nunca invente READY/NOT_READY.\n20. O Daily Brief e o D-1 possuem agendas independentes. Nunca altere uma agenda quando o usuário estiver falando da outra. Se a ativação do D-1 estiver aguardando destinatário, uma resposta curta com telefone pode continuar configure_d_minus_1_brief.\n21. Event Day Mode representa execução ao vivo no dia do evento. Use get_event_day_status para responder como o evento está agora; status, atrasos e próximas ações são calculados deterministicamente pelo backend.\n22. start_event_day e complete_event_day exigem pedido explícito no turno atual. Nunca inicie ou encerre o evento apenas por inferência.\n23. Chegada e saída reais de fornecedores nunca substituem arrivalAt/departureAt planejados. Use mark_event_day_vendor_arrived/departed somente quando o usuário afirmar explicitamente que o fornecedor chegou/saiu.\n24. Se o fornecedor mencionado for ambíguo, não escolha um arbitrariamente; peça o nome/categoria necessário.`
+17. Em configure_daily_brief, enabled deve ser JSON boolean: true somente para ativar/habilitar/receber diariamente e false somente para desativar/desligar explicitamente. Nunca envie "true"/"false" como string. Se o usuário pedir "configure meu brief diário para HH:mm todos os dias", isso significa enabled=true. Omita campos que não estiverem sendo alterados.\n18. Se o turno anterior pediu especificamente o número de WhatsApp para concluir a ativação do Daily Brief, uma resposta curta contendo apenas o número (por exemplo "envie para 21999999999") é continuação válida: use configure_daily_brief com recipient e não exija que o usuário repita "brief diário".\n19. Briefing D-1 é específico por evento e representa prontidão para a véspera. Use get_d_minus_1_brief para readiness/checklist/cronograma, generate_d_minus_1_brief somente com pedido explícito, e configure_d_minus_1_brief para o horário/ativação do envio na véspera. Readiness é calculado deterministicamente pelo backend; nunca invente READY/NOT_READY.\n20. O Daily Brief e o D-1 possuem agendas independentes. Nunca altere uma agenda quando o usuário estiver falando da outra. Se a ativação do D-1 estiver aguardando destinatário, uma resposta curta com telefone pode continuar configure_d_minus_1_brief.\n21. Event Day Mode representa execução ao vivo de UM evento e é opt-in por evento. Use get_event_day_status para responder como o evento está agora; status, atrasos, tasks, incidentes e próximas ações são calculados deterministicamente pelo backend.\n22. enable_event_day apenas habilita a capacidade. start_event_day inicia a sessão ao vivo. disable_event_day desliga a capacidade e encerra uma sessão ativa sem concluir o evento. Essas ações exigem pedido explícito no turno atual.\n23. complete_event_day encerra somente a sessão operacional e NÃO equivale a concluir o evento de negócio. Nunca diga que o evento inteiro foi concluído por essa tool.\n24. Event Day tasks usam create_event_day_task com kind checklist, operation ou incident. Só crie tasks quando o usuário pedir/registrar explicitamente algo a fazer; um incidente pode ser criado quando o usuário explicitamente relata um problema/imprevisto operacional.\n25. start_event_day_task, complete_event_day_task e resolve_event_day_incident exigem comando/estado explícito no turno atual. Incidente resolvido deve ser registrado com resolve_event_day_incident.\n26. Chegada e saída reais de fornecedores nunca substituem arrivalAt/departureAt planejados. Use mark_event_day_vendor_arrived/departed somente quando o usuário afirmar explicitamente que o fornecedor chegou/saiu.\n27. Se fornecedor ou task mencionada for ambígua, não escolha arbitrariamente; peça somente a referência necessária.`
 }
 
 function buildRuntimeContext(events: Event[], current: Event | null, pendingProposals: ChangeProposalWithImpacts[], openDependencies: DependencyImpact[], briefPreference: import('@ecc/domain').BriefPreference, dMinus1Schedule: import('@ecc/domain').BriefSchedule): string {
@@ -915,6 +1005,12 @@ function requiredRfc3339(args: Record<string, unknown>, key: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || Number.isNaN(new Date(value).getTime())) {
     throw new OperationalAgentValidationError(`Tool argument ${key} must be a valid RFC3339 datetime with timezone`)
   }
+  return value
+}
+function optionalRfc3339(args: Record<string, unknown>, key: string): string | null {
+  const value=args[key]
+  if(value===undefined||value===null||value==='')return null
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)||Number.isNaN(new Date(value).getTime()))throw new OperationalAgentValidationError(`Tool argument ${key} must be null or a valid RFC3339 datetime with timezone`)
   return value
 }
 function optionalNullableString(args: Record<string, unknown>, key: string): string | null {
@@ -1065,11 +1161,24 @@ function whatsAppRecipientFromSender(sender:string):string|null{
 
 
 function serializeEventDayForAgent(value: import('@ecc/domain').EventDaySnapshot){return value}
-function eventDayStatusLabel(value: import('@ecc/domain').EventDayOperationalStatus):string{return value==='not_started'?'não iniciado':value==='on_track'?'dentro do planejado':value==='attention'?'atenção':value==='critical'?'crítico':'concluído'}
-function isExplicitEventDayStart(text:string):boolean{const n=normalizeDecisionText(text);return /\b(inicie|iniciar|comece|comecar|abra|abrir|ative|ativar).*(event day|dia do evento|operacao do evento)|\b(event day|dia do evento).*(inicie|iniciar|comece|comecar|abra|ative)\b/.test(n)}
-function isExplicitEventDayCompletion(text:string):boolean{const n=normalizeDecisionText(text);return /\b(finalize|finalizar|conclua|concluir|encerre|encerrar|feche|fechar).*(event day|dia do evento|evento|operacao)|\b(event day|dia do evento).*(finalize|conclua|encerre|feche)\b/.test(n)}
+function eventDayStatusLabel(value: import('@ecc/domain').EventDayOperationalStatus):string{return value==='disabled'?'desativado':value==='not_started'?'não iniciado':value==='on_track'?'dentro do planejado':value==='attention'?'atenção':value==='critical'?'crítico':'concluído'}
+function eventDaySnapshotReply(eventName:string,snapshot:import('@ecc/domain').EventDaySnapshot):string{
+  if(!snapshot.enabled)return `Event Day está desativado para ${eventName}. A gestão ao vivo deste evento não interfere nos demais eventos.`
+  const incidents=snapshot.counts.openIncidents?` ${snapshot.counts.openIncidents} incidente(s) aberto(s).`:''
+  const tasks=snapshot.counts.openTasks?` ${snapshot.counts.openTasks} task(s) operacional(is) aberta(s).`:''
+  return `Event Day de ${eventName}: ${eventDayStatusLabel(snapshot.operationalStatus)}.${incidents}${tasks} Próxima ação: ${snapshot.nextActions[0]??'acompanhar a operação.'}`
+}
+function isExplicitEventDayEnable(text:string):boolean{const n=normalizeDecisionText(text);return /\b(ative|ativar|habilite|habilitar|ligue|ligar).*(event day|dia do evento|operacao do evento)|\b(event day|dia do evento).*(ative|ativar|habilite|habilitar|ligue|ligar)\b/.test(n)&&!/\b(desative|desativar|desabilite|desligue)\b/.test(n)}
+function isExplicitEventDayDisable(text:string):boolean{const n=normalizeDecisionText(text);return /\b(desative|desativar|desabilite|desabilitar|desligue|desligar).*(event day|dia do evento|operacao do evento)|\b(event day|dia do evento).*(desative|desativar|desabilite|desabilitar|desligue|desligar)\b/.test(n)}
+function isExplicitEventDayStart(text:string):boolean{const n=normalizeDecisionText(text);return /\b(inicie|iniciar|comece|comecar|abra|abrir).*(event day|dia do evento|operacao do evento)|\b(event day|dia do evento).*(inicie|iniciar|comece|comecar|abra|abrir)\b/.test(n)}
+function isExplicitEventDayCompletion(text:string):boolean{const n=normalizeDecisionText(text);return /\b(finalize|finalizar|conclua|concluir|encerre|encerrar|feche|fechar).*(event day|dia do evento|sessao|operacao)|\b(event day|dia do evento).*(finalize|conclua|encerre|feche)\b/.test(n)}
 function isExplicitVendorArrival(text:string):boolean{const n=normalizeDecisionText(text);return /\b(chegou|chegaram|esta no local|esta aqui|acabou de chegar|registre a chegada|marque.*chegada)\b/.test(n)}
 function isExplicitVendorDeparture(text:string):boolean{const n=normalizeDecisionText(text);return /\b(saiu|foram embora|foi embora|partiu|deixou o local|registre a saida|marque.*saida)\b/.test(n)}
+function isExplicitEventDayTaskCreation(text:string):boolean{const n=normalizeDecisionText(text);return /\b(crie|criar|adicione|adicionar|inclua|incluir|registre|registrar|precisamos|temos que)\b/.test(n)&&/\b(tarefa|task|checklist|event day|dia do evento|operacao)\b/.test(n)}
+function isExplicitEventDayIncident(text:string):boolean{const n=normalizeDecisionText(text);return /\b(problema|incidente|complicacao|imprevisto|falhou|parou|quebrou|deu errado|sem energia|sem luz)\b/.test(n)}
+function isExplicitEventDayTaskStart(text:string):boolean{const n=normalizeDecisionText(text);return /\b(inicie|iniciar|comece|comecar|marque).*(tarefa|task)|\b(tarefa|task).*(andamento|inicie|comece)\b/.test(n)}
+function isExplicitEventDayTaskCompletion(text:string):boolean{const n=normalizeDecisionText(text);return /\b(conclua|concluir|complete|completar|finalize|finalizar|marque).*(tarefa|task)|\b(tarefa|task).*(concluida|concluido|feito|pronto)\b/.test(n)}
+function isExplicitEventDayIncidentResolution(text:string):boolean{const n=normalizeDecisionText(text);return /\b(resolvemos|resolvido|resolvida|resolva|resolver|corrigimos|corrigido|normalizou|solucionado)\b/.test(n)&&/\b(problema|incidente|complicacao|imprevisto|gerador|energia|luz|som|cadeira|mesa)\b/.test(n)}
 function resolveEventDayVendor(snapshot:import('@ecc/domain').EventDaySnapshot,reference:string):import('@ecc/domain').EventDayVendorSnapshot{
   const ref=normalizeDecisionText(reference)
   if(ref.length<2)throw new OperationalAgentValidationError('vendorReference must identify a vendor')
@@ -1085,6 +1194,16 @@ function resolveEventDayVendor(snapshot:import('@ecc/domain').EventDaySnapshot,r
   if(matches.length===1)return matches[0]!
   if(matches.length===0)throw new OperationalAgentValidationError(`Vendor reference not found in Event Day: ${reference}`)
   throw new OperationalAgentValidationError(`Vendor reference is ambiguous in Event Day: ${reference}`)
+}
+
+function resolveEventDayTask(snapshot:import('@ecc/domain').EventDaySnapshot,reference:string,kind?:import('@ecc/domain').EventDayTaskKind):import('@ecc/domain').EventDayTaskSnapshot{
+  const ref=normalizeDecisionText(reference)
+  if(ref.length<2)throw new OperationalAgentValidationError('taskReference must identify an Event Day task')
+  const candidates=snapshot.tasks.filter(task=>(!kind||task.kind===kind)&&(task.status==='pending'||task.status==='in_progress'))
+  const matches=candidates.filter(task=>{const title=normalizeDecisionText(task.title);return title===ref||title.includes(ref)||ref.includes(title)})
+  if(matches.length===1)return matches[0]!
+  if(matches.length===0)throw new OperationalAgentValidationError(`Event Day task reference not found: ${reference}`)
+  throw new OperationalAgentValidationError(`Event Day task reference is ambiguous: ${reference}`)
 }
 
 function clamp(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, Math.trunc(value))) }
